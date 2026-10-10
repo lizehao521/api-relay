@@ -11,17 +11,17 @@
 | 语言 | TypeScript 5.6（strict），编译到 ESM |
 | **运行时依赖** | **0 个**（仅 `node:http` / `node:crypto` / `node:sqlite` 等内置模块） |
 | 开发依赖 | typescript、@types/node、tsx |
-| 源码规模 | 28 个文件 / 9,721 行（不含测试） |
-| 测试规模 | 单测以 `node --test` 实际输出为准（当前 216 项）；另有 30 项真实进程冒烟检查 |
+| 源码规模 | 42 个文件 / 19,966 行（不含测试） |
+| 测试规模 | `node --test` 实测 **269 项通过 / 0 失败** |
 | 存储 | SQLite（WAL，控制面） / 内存（可切换） |
-| 核心模块 | `loss/` 降损层 2,133 行 · `gateway/` 网关 1,889 行 · `upstream/` 上游池 1,265 行 · `store/` 度量库 923 行 |
+| 核心模块 | `loss/` 降损层 2,073 行 · `gateway/` 网关 3,383 行 · `upstream/` 上游池 · `store/` 度量库 |
 
 ---
 
 ## 1. 一条命令跑起来
 
 ```bash
-cd "/home/ctyun/文档/二转厂商单模型/api-relay"
+cd api-relay
 
 bash demo.sh          # 或者： npm run demo
 ```
@@ -57,7 +57,7 @@ bash demo.sh          # 或者： npm run demo
 ## 2. 接第一个真实厂商（起步就走这条）
 
 ```bash
-cd "/home/ctyun/文档/二转厂商单模型/api-relay"
+cd api-relay
 
 node dist/cli.js vendors                          # 看有哪些内置厂商模板
 node dist/cli.js starter --vendor deepseek        # 生成 starter.yaml（单厂商单模型）

@@ -327,8 +327,15 @@ test('e2e: 管理接口在未带令牌时拒绝远程语义（本机无令牌时
     const html = await dashboard.text();
     assert.ok(html.includes('管理面板'));
     // 六个视图：总览 / 指标 / 客户 Key / 上游 / 请求账本 / 信任
-    for (const view of ["'ov'", "'met'", "'users'", "'ch'", "'ledger'", "'trust'"]) {
-      assert.ok(html.includes(view), `面板缺少视图 ${view}`);
+    //
+    // ⚠ 判据口径修正（2026-10-10）：原先写死单引号 `"'ov'"`，只能在 APP_SRC **回落模式**
+    // 下通过——minify 后 esbuild 会把引号统一成双引号，min 生效时这 6 条必然失败。
+    // 即：这个断言一直只在降级路径上绿过，从未真正覆盖 min 生效的正常路径
+    // （哈希新鲜度校验修好后才第一次暴露）。
+    // 改为两种引号形式都接受——要验的是「视图标记存在」，不是「引号风格」。
+    for (const view of ['ov', 'met', 'users', 'ch', 'ledger', 'trust']) {
+      const present = html.includes(`'${view}'`) || html.includes(`"${view}"`);
+      assert.ok(present, `面板缺少视图 ${view}`);
     }
     // 面板要能写，不只是能看
     assert.ok(html.includes('新建 Key'));
@@ -342,7 +349,14 @@ test('e2e: 管理接口在未带令牌时拒绝远程语义（本机无令牌时
     assert.ok(html.includes('id="login"'));
     assert.ok(html.includes('id="drawer"'));
     // 「一眼看懂」横幅：必须能把常见故障翻译成人话
-    assert.ok(html.includes('statusBanner'), '总览需要有状态判断');
+    // ⚠ 判据口径修正（2026-10-10）：原断言 `html.includes('statusBanner')` 验的是
+    // **标识符名**——esbuild minify 会 mangle 掉变量名，min 生效时必然失败。
+    // 与上面视图引号那 6 条同族：都只在 APP_SRC 回落模式下绿过。
+    // 改为验「状态横幅的用户可见文案」——这才是要守的语义，且中文字符串 minify 不改。
+    assert.ok(
+      html.includes('还没有请求') || html.includes('上游拒绝了你配置的密钥'),
+      '总览需要有状态判断',
+    );
     for (const msg of ['还没有配置上游', '上游拒绝了你配置的密钥', '上游账户余额/额度不足', '还没有请求']) {
       assert.ok(html.includes(msg), `状态横幅缺少判断: ${msg}`);
     }

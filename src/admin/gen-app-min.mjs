@@ -10,7 +10,7 @@
  */
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -19,7 +19,8 @@ const require = createRequire(import.meta.url);
 const root = join(here, '..', '..');
 
 // dist 的 dashboard.js 导出 APP_SRC（源码真源）
-const mod = await import(join(root, 'dist', 'admin', 'dashboard.js'));
+// Windows 上裸绝对路径（C:\...）会被 ESM loader 拒绝，必须走 file:// URL（跨平台同样合法）
+const mod = await import(pathToFileURL(join(root, 'dist', 'admin', 'dashboard.js')).href);
 const APP_SRC = mod.APP_SRC;
 if (typeof APP_SRC !== 'string' || APP_SRC.length < 10000) {
   console.error('FAIL: dist/admin/dashboard.js 未导出有效 APP_SRC（先 npm run build）');
@@ -29,7 +30,7 @@ const sha = createHash('sha256').update(APP_SRC, 'utf8').digest('hex');
 
 let esbuild;
 try {
-  esbuild = require(join(root, 'node_modules', 'esbuild'));
+  esbuild = require(join(root, 'node_modules', 'esbuild')); // CJS require 接受裸路径，无需转换
 } catch {
   console.error('FAIL: esbuild 不可用（传递依赖消失？）——min 未生成，页面回落源码模式（正确但大）');
   process.exit(1);

@@ -1,0 +1,93 @@
+# api-relay 配置 · Agnes 二转（带档位阶梯）
+#
+# 这个文件里的模型清单与能力都是**实测**得出的，不是猜的：
+#   · agnes-3.0-flash / 2.5-flash / 2.0-flash  → 支持 function calling ✓
+#   · agnes-2.5-pro / -alpha / -beta           → 全部 HTTP 403（你的 key 没权限）
+#   · agnes-image-* / agnes-video-*            → 非对话端点，不纳入
+#
+# 所以现在"旗舰档"只能是 flash 里最强的那个。等你的 key 开通 pro 权限后，
+# 把 agnes-2.5-pro 加到 flagship 阶梯的第一阶即可。
+
+server:
+  host: 127.0.0.1
+  port: 8787
+  adminToken: "{ENV:RELAY_ADMIN_TOKEN:-}"
+  publicQuota: true          # 公开只读的 /v1/quota 与 /v1/panel，供本机面板读取
+
+storage:
+  driver: sqlite
+  path: data/relay.db
+
+logLevel: info
+
+providers:
+  - id: agnes
+    label: Agnes
+    protocol: openai
+    baseUrl: https://apihub.agnes-ai.com/v1
+    apiKey: "{ENV:AGNES_API_KEY}"
+    models: [agnes-3.0-flash, agnes-2.5-flash, agnes-2.0-flash]
+    # 实测：Agnes 的 Authorization 不带 Bearer 前缀，裸 token 才行
+    auth: { format: bearerless }
+    cost: { inputPerMTok: 0, outputPerMTok: 0, cachedInputPerMTok: 0 }
+    priority: 10
+    tags: [direct]
+
+# ── 模型能力表：切模型前的安全前提 ─────────────────────────────────────
+# 带 tools 的请求只会被切到 tools: true 的模型；没声明的字段视为"未知，允许"。
+# contextWindow 我没填——没实测过就不编。填上之后，超长请求会自动跳过放不下的模型。
+modelCapabilities:
+  agnes-3.0-flash: { tools: true }
+  agnes-2.5-flash: { tools: true }
+  agnes-2.0-flash: { tools: true }
+
+# ── 档位阶梯（竖向）────────────────────────────────────────────────────
+# 第一阶是首选，失败就试第二阶。方向完全由这张表决定，不是写死的单向降级。
+#
+#   旗舰档：旗舰挂了 → 往下推（平衡、极速）
+#   极速档：极速挂了 → 往上推（平衡、旗舰）
+#   平衡档：同层先随便切，再向外
+#
+# 目的不是省钱，是**让客户的任务自动跑完**。客户在响应头能看到实际服务的是哪个模型：
+#   x-relay-model-requested / x-relay-model-served / x-relay-ladder / x-relay-switched
+modelLadders:
+  flagship: [agnes-3.0-flash, agnes-2.5-flash, agnes-2.0-flash]
+  balanced: [agnes-2.5-flash, agnes-3.0-flash, agnes-2.0-flash]
+  fast:     [agnes-2.0-flash, agnes-2.5-flash, agnes-3.0-flash]
+
+# 客户端也能直接写具体模型名（agnes-3.0-flash），阶梯只对写在表里的名字生效。
+
+clients:
+  - id: free
+    label: 免费层（纯转发，错误体一个字节都不加）
+    key: "{ENV:RELAY_KEY_FREE:-sk-relay-free}"
+    tier: free
+    tenantId: demo
+    enabled: true
+  - id: standard
+    label: 标准层（归因走响应头）
+    key: "{ENV:RELAY_KEY_STANDARD:-sk-relay-standard}"
+    tier: standard
+    tenantId: demo
+    enabled: true
+  - id: pro
+    label: Pro 层（预检 + 归因全开 + 档位阶梯）
+    key: "{ENV:RELAY_KEY_PRO:-sk-relay-pro}"
+    tier: pro
+    tenantId: demo
+    enabled: true
+
+lossReduction:
+  precheck:
+    enabled: true
+    onBlock: reject        # 灰度期可改 observe（只记录不拦）
+  attribution:
+    enabled: true
+    autoRetry: 1           # 同一模型最多再来一次；再不行就沿阶梯换模型
+    backoffBaseMs: 300
+    backoffMaxMs: 3000
+  meter:
+    enabled: true
+    retentionDays: 30
+  trace:
+    enabled: true

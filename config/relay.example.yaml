@@ -1,0 +1,94 @@
+# 模型 API 聚合中转站 — 示例配置
+# 复制为 config/relay.yaml 后按需修改；所有密钥请用 {ENV:NAME} 插值，禁止明文写入。
+
+server:
+  host: 127.0.0.1
+  port: 8787
+  adminToken: "{ENV:RELAY_ADMIN_TOKEN:-demo-admin-token-please-change}"
+  trustProxy: false
+
+storage:
+  driver: sqlite
+  path: data/relay.db
+
+logLevel: info
+
+providers:
+  - id: deepseek
+    label: DeepSeek 官方
+    protocol: openai
+    baseUrl: https://api.deepseek.com/v1
+    apiKey: "{ENV:DEEPSEEK_API_KEY}"
+    models: [deepseek-chat, deepseek-reasoner]
+    weight: 1
+    priority: 10
+    tags: [cn, official]
+    cost: { inputPerMTok: 2, outputPerMTok: 8, cachedInputPerMTok: 0.5 }
+  - id: siliconflow
+    label: 硅基流动（便宜上游，用于 smart routing）
+    protocol: openai
+    baseUrl: https://api.siliconflow.cn/v1
+    apiKey: "{ENV:SILICONFLOW_API_KEY:-}"
+    models: [Qwen/Qwen2.5-7B-Instruct]
+    weight: 1
+    priority: 5
+    tags: [cn, cheap]
+    cost: { inputPerMTok: 0.5, outputPerMTok: 1.5 }
+  - id: mock
+    label: 本地 mock 上游（离线自测，勿用于生产）
+    protocol: openai
+    baseUrl: http://127.0.0.1:8899/v1
+    apiKey: "mock-key"
+    models: [mock-small, mock-large, mock-429, mock-500, mock-401, mock-404, mock-400, mock-502, mock-503, mock-filter, mock-context, mock-balance]
+    weight: 1
+    priority: 1
+    tags: [local, cheap, unstable]
+    # 说明：mock-429 / mock-500 / mock-401 等是 mock 上游的故障注入模型名。
+    # 真实上游不需要这些；这里声明它们只是为了让 P2 预检放行请求，
+    # 从而端到端演示 P3 失败归因与自动故障转移。
+    cost: { inputPerMTok: 0.2, outputPerMTok: 0.6 }
+
+modelAliases:
+  gpt-4o-mini: mock-small
+  default: deepseek-chat
+
+defaultProvider: deepseek
+
+clients:
+  - id: demo-free
+    label: 演示-免费层
+    key: "{ENV:RELAY_KEY_FREE:-sk-relay-free-demo}"
+    tier: free
+    tenantId: demo
+    enabled: true
+  - id: demo-standard
+    label: 演示-标准层
+    key: "{ENV:RELAY_KEY_STANDARD:-sk-relay-standard-demo}"
+    tier: standard
+    tenantId: demo
+    enabled: true
+  - id: demo-pro
+    label: 演示-Pro 层
+    key: "{ENV:RELAY_KEY_PRO:-sk-relay-pro-demo}"
+    tier: pro
+    tenantId: demo
+    enabled: true
+
+lossReduction:
+  precheck:
+    enabled: true
+    onBlock: reject
+    budgetUs: 3000
+  attribution:
+    enabled: true
+    includeEvidence: false
+    autoRetry: 1
+    backoffBaseMs: 400
+    backoffMaxMs: 8000
+  meter:
+    enabled: true
+    retentionDays: 30
+  trace:
+    enabled: true
+    ringSize: 500
+    persist: true

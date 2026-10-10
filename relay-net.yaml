@@ -1,0 +1,393 @@
+# api-relay · 对外服务配置（Agnes 中转 + MiMo 原厂）
+#
+# 与 agnes-ladder.yaml 的区别：
+#   · 绑到 0.0.0.0，局域网/隧道可访问（原来只绑 127.0.0.1）
+#   · 设了 adminToken（对外开放**必须**设，否则管理接口裸奔）
+#   · /v1/quota 与 /v1/panel 仍只允许本机（它们暴露用量与轨迹）
+#
+# 密钥都走环境变量，不写明文进文件。
+
+server:
+  # 绑定 `::` = 双栈：同时接受 IPv4（局域网 192.168.2.116）与 IPv6（公网 240e:...）。
+  # 原来写 0.0.0.0 是**纯 IPv4**，所以公网 IPv6 根本连不进来。
+  host: "::"
+  port: 8787
+  adminToken: "{ENV:RELAY_ADMIN_TOKEN}"
+  # 当前无任何作用（保留字段）：网关不记录客户端 IP（meter 无 IP 列、限流按 key 归属、
+  # 审计与鉴权失败直接读 socket.remoteAddress）。唯一消费方 clientIp() 因零读取点已删除。
+  # 保留是为了不让既有配置装载失败；详见 core/types.ts 的 trustProxy 注释。
+  trustProxy: true
+  publicQuota: true         # 启用 /v1/quota 与 /v1/panel
+  publicQuotaRemote: false  # 但只允许本机读（对外暴露时**别改这个**）
+  # 超时必须显式设：内置默认是 TTFB 120 秒 / 整体 600 秒（10 分钟），
+  # 对"上游卡住就换下一阶"的阶梯来说太长 —— 上游一挂，请求会一直吊着，
+  # 阶梯根本没机会往下走（实测：免费档的 Agnes 卡了 31.6 秒，客户端只能自己断）。
+  # 首字节 60 秒内没来就判这一阶失败，整条最多 5 分钟（长推理够用）。
+  #
+  # ⚠️ 2026-09-14：这个值原来是 30000，**实测证明它压在真实延迟分布的 p99 上**，
+  # 属于系统性误杀 —— 24 小时里 6 个客户流式大请求各挂 60.4 秒后 502，
+  # 轨迹显示两次尝试都精确停在 30.0 秒。查我们自己 24h 的成功请求 TTFB：
+  #   n=387  p50 2.9s  p90 18.9s  p99 29.5s  **max 31.5s**
+  # 有一条**成功**的请求首字节花了 31.5 秒 —— 比闸门还长，说明这条线每天
+  # 都在砍掉本来能成的请求。Agnes 的真实抖动是 0.39s~31s（直连实测：
+  # 576 KB/401 条消息首字节 0.39s），跟请求大小无关，所以不加"按体积缩放"，
+  # 直接取观测最大值的 2 倍。停摆看门狗仍是 20 秒，管的是"回了头不发体"。
+  # 2026-09-14 再调一次（60s → 90s）：客户实测发的是 **14.5~15.3 万 token 的超长轨迹**，
+  # Agnes 的首字节本来就要 15~53 秒（实测成功样本：16.1 / 29.0 / 33.5 / 41.2 / 42.6 / 53.1 秒）。
+  # 60 秒正好卡在这个分布的边缘 —— 一超就换到"慢约 100 倍"的国际兜底线，两条都超时 →
+  # 120 秒后 502。把闸门抬到 90 秒，让"慢但能成"的请求别再被误杀。
+  upstreamTtfbTimeoutMs: 90000
+  upstreamTimeoutMs: 300000
+  # 上游**停摆**超时：不只看响应头，还要看"数据还在不在流动"。
+  # 2026-09-13 实测踩到的坑：Agnes 国际线路 0.9 秒就回了响应头，然后 body 150 秒
+  # 不产出 —— 首字节超时当场解除，请求被吊到总超时，**客户 111 秒先放弃（拿到 499）**；
+  # 而且流式一拿到响应头就把 200 提交了，那之后再也换不了线路。
+  # 现在：流式要等**第一个数据块**才提交状态码，非流式给读体加同样的看门狗；
+  # 停摆 → 按 upstream_timeout 处理（可重试）→ 同请求内切到国内那条（实测 0.76 秒）。
+  upstreamStallTimeoutMs: 20000
+
+  # ── 2026-09-15：客户"只回一条就没反应" ───────────────────────────────
+  # Agnes 对 14 万 token 的超长轨迹要 15~90 秒才产出第一个内容块；网关此前
+  # 要等第一块才写响应头，客户在这几十秒里收不到任何字节 → 客户端/代理先超时断开。
+  # 开启"提前提交 + 心跳"：超过 8 秒还没等到上游内容就先发 200 + SSE 头，
+  # 再每 5 秒写一个 SSE 注释行（: keepalive）保活。真实数据仍逐字节透传。
+  streamCommitGraceMs: 8000
+  streamHeartbeatMs: 5000
+
+  # ── 2026-09-15：双线路对冲，保"任务完成率" ─────────────────────────
+  # Agnes 两条线路（agnes-cn 主 / agnes 国际备）经常"慢但都 200"：旧的"出错才换线"
+  # 不介入，客户只能干等 15~90 秒。开启对冲后，主线路 N 秒还没出首个响应就并发
+  # 备线路，谁先出内容用谁，另一条立即中止。
+  # ⚠️ 2026-09-16 实测：agnes-cn 正常时 9~18 秒出首内容，而备线路 agnes 国际
+  #    **稳定更慢**（9 次对冲 0 次赢）——所以阈值取 20 秒，只让真正的长尾（客户
+  #    145k token 请求实测 26~92 秒）触发对冲，正常请求不被翻倍。
+  hedgeDelayMs: 20000
+
+storage:
+  driver: sqlite
+  path: data/relay.db
+
+logLevel: info
+
+providers:
+  # ── MiMo 原厂（实测：/v1 与 /anthropic 两个端点都通，两个模型都支持工具调用）──
+  - id: mimo
+    label: MiMo 原厂
+    protocol: openai
+    baseUrl: https://api.xiaomimimo.com/v1
+    apiKey: "{ENV:MIMO_API_KEY}"
+    # 2026-09-23 更新：上游 /models 实测新增 v2.6 家族（mimo-v2.6-flash / mimo-v2.6-pro /
+    # mimo-v2.6-pro-ultraspeed，均已用本站 key 实测 200 可用，工具调用正常；v2.6-pro 是
+    # 推理模型，响应带 reasoning_content）。v2.5 的两个保留。上游另有 asr/tts/voiceclone/
+    # voicedesign 等语音型号——不是 chat 协议，不接（与 stepfun 块的 stepaudio-* 同理）。
+    models: [mimo-v2.6-flash, mimo-v2.6-pro, mimo-v2.6-pro-ultraspeed, mimo-v2.5-pro, mimo-v2.5]
+    # 官方牌价（元 / 百万 token）——按 MiMo-V2.5 系列：
+    #   输入(命中缓存) ¥0.025 ｜ 输入(未命中) ¥3.00 ｜ 输出 ¥6.00
+    # 历史注：早期 cost 只能**按供应商**配。2026-09-14 起已支持**按型号**覆盖（modelCosts /
+    # modelListCosts），下面 agnes 块的 modelCosts 就是例子 —— 这段话留着是为了解释旧配置。本供应商同时提供
+    # mimo-v2.5（非 pro），若它的牌价与 pro 不同，这些调用会按 pro 价计 ——
+    # 要精确到模型需要再加一层"按模型定价"，届时告诉我即可。
+    cost: { inputPerMTok: 3.0, outputPerMTok: 6.0, cachedInputPerMTok: 0.025 }
+    # priority 25 > 聚合站 15（数字大者优先）→ **原厂主用**。
+    # 原厂宕机时熔断器把它摘掉，同名模型自动落到 TokenRhythm（¥10 账号）兜底；
+    # 冷却到期后熔断器半开试探原厂，一试成功就自动切回主用 —— 客户侧 model 名不变。
+    priority: 25
+    tags: [direct, official]
+    # 说明：MiMo 另有 /anthropic/v1/messages 端点（Anthropic 协议），实测可用，
+    # 但本网关目前只实现 OpenAI 协议，所以这里只接 /v1。
+
+  # ── Agnes 国际线路（apihub，主用）──
+  # 与下面的 agnes-cn 声明**完全相同的三个模型名**，所以这是一次横向故障转移：
+  # 客户写的 agnes-3.0-flash 一个字都不用改，国际线路被摘除时自动落到国内，
+  # 应答语义与 model 名完全一致（这正是"同模型"才敢自动切的前提）。
+  - id: agnes
+    label: Agnes 国际
+    protocol: openai
+    baseUrl: https://apihub.agnes-ai.com/v1
+    apiKey: "{ENV:AGNES_API_KEY}"
+    models: [agnes-3.0-flash, agnes-2.5-flash, agnes-2.0-flash]
+    auth: { format: bearerless }     # 实测：Agnes 不接受 Bearer 前缀
+    # 官方牌价（美元 / 百万 token）：缓存命中 $0.005 ｜ 输入 $0.05 ｜ 输出 $0.15
+    # 本表单位是**人民币元**（见 ProviderCost），按 1 USD = 7.2 CNY 换算：
+    #   0.005×7.2 = 0.036 ｜ 0.05×7.2 = 0.36 ｜ 0.15×7.2 = 1.08
+    # 结算汇率不同就改这三个数；计价公式见 src/loss/meter.ts 的 computeCost。
+    # ⚡ 必须走 HTTP/2：实测 Agnes 的 HTTP/1.1 路径慢且抖（同一请求 h2 稳 0.13~0.35s，
+    #    h1.1 会跑到 2~20s，undici 更是能挂 54s；卡的是"等响应头"，建连一直正常）。
+    #    Node 的 fetch 只支持 h1.1，所以这条上游必须开 http2。建连失败会自动回退 h1.1。
+    http2: true
+    # ── 单价：两个口径都记（2026-09-14 起）────────────────────────────────
+    # `cost`     = **实付**（当前有效价，含限时优惠）→ 面板「上游成本」与真实毛利看它
+    # `listCost` = **刊例价**（牌面价）→ "这些量按原价值多少钱"，对外报价对比看它
+    # 已核对官方定价页（agnes-ai.com/zh-Hans/docs/pricing）：
+    #   agnes-3.0-flash / agnes-2.5-flash  **现价 $0**（刊例 $0.05 入 / $0.15 出 / $0.005 缓存）
+    #   agnes-2.5-pro                      $0.45 / $0.90（我们没接）
+    # 厂商级 cost 是**兜底**：`agnes-2.0-flash` 官方定价页未列出，先按刊例价保守估；
+    # 已知免费的型号用 modelCosts 覆盖成 0。美元 → 人民币按 1:7.2。
+    cost: { inputPerMTok: 0.36, outputPerMTok: 1.08, cachedInputPerMTok: 0.036 }
+    listCost: { inputPerMTok: 0.36, outputPerMTok: 1.08, cachedInputPerMTok: 0.036 }
+    modelCosts:
+      agnes-3.0-flash: { inputPerMTok: 0, outputPerMTok: 0, cachedInputPerMTok: 0 }
+      agnes-2.5-flash: { inputPerMTok: 0, outputPerMTok: 0, cachedInputPerMTok: 0 }
+    # ⚠️ **2026-09-13 晚临时降为兜底**：国际线路实测"响应头就要 ~10 秒、body 可 150 秒不产出"，
+    # 比国内（0.76 秒）慢约 100 倍，实质等同故障。当时国际主用导致**每 30 秒就有一个请求吃 31 秒**
+    # （停摆判死 + 熔断冷却到期后的半开试探）。经确认把国内提为主用。
+    # 国际恢复后把这两处 priority 换回来即可（agnes 10 / agnes-cn 8）：
+    #   curl -s -H "Authorization: Bearer $(cat /tmp/admin-token.txt)" localhost:8787/admin/api/providers
+    #   看 health.ewmaLatencyMs 与熔断状态判断它是否缓过来了。
+    priority: 8
+    tags: [direct, official, intl]
+
+  # ── Agnes 国内线路（api.agnes-ai.cn，兜底）──
+  # 2026-09-13 实测：三个对话模型两边都在；真实推理国际 13.18s / 国内 10.05s
+  # （各一次样本，仅作参考，Agnes 本身波动很大）。
+  # 国内清单是 11 个（少一个 agnes-image-2.0-flash）；图片/视频模型不在本网关路由范围内。
+  - id: agnes-cn
+    label: Agnes 国内
+    protocol: openai
+    baseUrl: https://api.agnes-ai.cn/v1
+    apiKey: "{ENV:AGNES_CN_API_KEY}"
+    models: [agnes-3.0-flash, agnes-2.5-flash, agnes-2.0-flash]
+    auth: { format: bearerless }     # 与国内直连实测一致：裸 key，同样不加 Bearer
+    # 官方牌价（美元 / 百万 token）：缓存命中 $0.005 ｜ 输入 $0.05 ｜ 输出 $0.15
+    # 本表单位是**人民币元**（见 ProviderCost），按 1 USD = 7.2 CNY 换算：
+    #   0.005×7.2 = 0.036 ｜ 0.05×7.2 = 0.36 ｜ 0.15×7.2 = 1.08
+    # 结算汇率不同就改这三个数；计价公式见 src/loss/meter.ts 的 computeCost。
+    # ⚡ 必须走 HTTP/2：实测 Agnes 的 HTTP/1.1 路径慢且抖（同一请求 h2 稳 0.13~0.35s，
+    #    h1.1 会跑到 2~20s，undici 更是能挂 54s；卡的是"等响应头"，建连一直正常）。
+    #    Node 的 fetch 只支持 h1.1，所以这条上游必须开 http2。建连失败会自动回退 h1.1。
+    http2: true
+    # ── 单价：两个口径都记（2026-09-14 起）────────────────────────────────
+    # `cost`     = **实付**（当前有效价，含限时优惠）→ 面板「上游成本」与真实毛利看它
+    # `listCost` = **刊例价**（牌面价）→ "这些量按原价值多少钱"，对外报价对比看它
+    # 已核对官方定价页（agnes-ai.com/zh-Hans/docs/pricing）：
+    #   agnes-3.0-flash / agnes-2.5-flash  **现价 $0**（刊例 $0.05 入 / $0.15 出 / $0.005 缓存）
+    #   agnes-2.5-pro                      $0.45 / $0.90（我们没接）
+    # 厂商级 cost 是**兜底**：`agnes-2.0-flash` 官方定价页未列出，先按刊例价保守估；
+    # 已知免费的型号用 modelCosts 覆盖成 0。美元 → 人民币按 1:7.2。
+    cost: { inputPerMTok: 0.36, outputPerMTok: 1.08, cachedInputPerMTok: 0.036 }
+    listCost: { inputPerMTok: 0.36, outputPerMTok: 1.08, cachedInputPerMTok: 0.036 }
+    modelCosts:
+      agnes-3.0-flash: { inputPerMTok: 0, outputPerMTok: 0, cachedInputPerMTok: 0 }
+      agnes-2.5-flash: { inputPerMTok: 0, outputPerMTok: 0, cachedInputPerMTok: 0 }
+    # ⚠️ 2026-09-13 晚**临时提为主用**（国际线路慢约 100 倍，见上面 agnes 的说明）。
+    # 国际恢复后换回：agnes 10 / agnes-cn 8。
+    priority: 10
+    tags: [direct, official, cn]
+
+  # 说明：agnes / agnes-cn 与下面的 tokenrhythm 是同一件事的两种用途 ——
+  #   · agnes + agnes-cn  = 同一家厂商的两条**线路**（同模型、不同接入点）
+  #   · mimo + tokenrhythm = 同一个模型名的两家**厂商**
+  # 两者都靠"同名模型 + priority"实现自动切换，不需要额外机制。
+
+  # ── TokenRhythm（聚合站，实测提供同名 mimo-v2.5-pro）──
+  # 价值不在"多一个模型"，而在**同一个模型多了一个供应商**：原厂和它声明同一个
+  # `mimo-v2.5-pro`，于是走的是横向故障转移 —— 原厂挂了/被限流时自动切到它，
+  # 客户侧的 model 名字一个都不用改。
+  # priority 15 < 原厂 20（数字大者优先），所以默认走原厂、它兜底。
+  - id: tokenrhythm
+    label: TokenRhythm
+    protocol: openai
+    baseUrl: https://tokenrhythm.studio/v1
+    apiKey: "{ENV:TOKENRHYTHM_API_KEY}"
+    models: [mimo-v2.5-pro]
+    # 与 MiMo 原厂**同一模型**，费用按同一牌价计。
+    # 这一点很关键：它接管的那些调用如果 cost 为空，成本会被算成 ¥0，
+    # 客户的"¥10 预算"就被悄悄少算了。聚合站实际结算价若不同，请告诉我改这里。
+    cost: { inputPerMTok: 3.0, outputPerMTok: 6.0, cachedInputPerMTok: 0.025 }
+    # priority 15 < 原厂 25 → **兜底**：只在原厂被熔断/摘除时接管。
+    # 这不是"多一个模型"，而是同一个 mimo-v2.5-pro 多一个供应商（横向），
+    # 所以切换对客户完全无感（Agent 问到的 model 名与回答语义都一样）。
+    priority: 15
+    tags: [aggregator]
+
+  # ── StepFun（阶跃星辰 · step_plan 通道）──
+  # 2026-09-20 新增：接入点 https://api.stepfun.com/step_plan/v1
+  # （对话端点 /chat/completions），token 见 .relay-net.env 的 STEPFUN_API_KEY。
+  # 注意：step_plan 是供货商给的专用通道路径，与官方文档的 /v1 不同 ——
+  #   上游若换路径，只改这一处 baseUrl，客户端 model 名不用动。
+  # 密钥沿革：供货商先后给过两把 token（DVkRD…、1HDdg…），均被上游 401；
+  #   最终确认可用的就是本机 DSH 凭据库里的 STEP_API_KEY（与 settings.yaml 里
+  #   step provider 同一把，本会话的模型推理正走这条通道）。已写入 .relay-net.env。
+  # 模型清单来自上游 /models 实测（2026-09-20）：
+  #   step-5-preview（1M 上下文，推理模型）/ step-3.7-flash / step-3.5-flash(2603)
+  #   / step-router-v1。stepaudio-* 与 step-image-edit-2 不是 chat 协议，不接。
+  # 价格：牌价未确认，暂按 0 计（成本看板不会虚增）；拿到官方价目后补 cost/listCost。
+  - id: stepfun
+    label: StepFun 阶跃星辰
+    protocol: openai
+    baseUrl: https://api.stepfun.com/step_plan/v1
+    apiKey: "{ENV:STEPFUN_API_KEY}"
+    models: [step-5-preview, step-3.7-flash, step-3.5-flash, step-3.5-flash-2603, step-router-v1]
+    cost: { inputPerMTok: 0, outputPerMTok: 0, cachedInputPerMTok: 0 }
+    # 与现有 4 个上游的模型名零重叠 → 不影响任何现有路由；优先级给低位数，
+    # 仅当客户显式请求 step-* 模型时启用，不参与其他模型的抢占。
+    priority: 5
+    tags: [direct, stepfun]
+
+  # ── SenseNova 商汤（聚合站，多厂商路由）──
+  # 接入点 https://token.sensenova.cn/1/chat/completions
+  # 上游 /v1/models 实测 2026-09-26：9 个模型（含 DeepSeek/GLM/Kimi/商汤自研）
+  # 统一走 SenseNova 聚合站协议，modelMap 映射本站别名 → 上游实际 model 名
+  - id: sensenova
+    label: SenseNova 商汤
+    protocol: openai
+    baseUrl: https://token.sensenova.cn/1
+    apiKey: "{ENV:SENSENOVA_API_KEY}"
+    models: [sense-6.8-flash-lite, sense-u1-fast, sense-u1.5-lite, sense-glm-5.2, sense-kimi-k3, sense-deepseek-v4-flash, sense-deepseek-v4.1-flash, sense-deepseek-v4-pro, sense-deepseek-flash]
+    modelMap:
+      sense-6.8-flash-lite: sensenova-6.8-flash-lite
+      sense-u1-fast: sensenova-u1-fast
+      sense-u1.5-lite: sensenova-u1.5-lite
+      sense-glm-5.2: glm-5.2
+      sense-kimi-k3: kimi-k3
+      sense-deepseek-v4-flash: deepseek-v4-flash
+      sense-deepseek-v4.1-flash: deepseek-v4.1-flash
+      sense-deepseek-v4-pro: deepseek-v4-pro
+      sense-deepseek-flash: deepseek-flash
+    cost: { inputPerMTok: 0, outputPerMTok: 0, cachedInputPerMTok: 0 }
+    priority: 5
+    tags: [direct, sensenova, aggregator]
+
+# ── 模型能力表（实测得出，切模型的安全前提）──
+modelCapabilities:
+  # v2.6 家族（2026-09-23 实测 tools 可用后补声明——config 校验器会对阶梯里
+  # 没声明能力的模型告警，带工具调用的请求切过去可能直接失败）
+  mimo-v2.6-flash: { tools: true }
+  mimo-v2.6-pro: { tools: true }
+  mimo-v2.6-pro-ultraspeed: { tools: true }
+  mimo-v2.5-pro: { tools: true }
+  mimo-v2.5: { tools: true }
+  agnes-3.0-flash: { tools: true, maxOutputTokens: 65536 }
+  agnes-2.5-flash: { tools: true, maxOutputTokens: 65536 }
+  agnes-2.0-flash: { tools: true, maxOutputTokens: 65536 }
+  # Agnes 输出上限（2026-10-02 实测：max_tokens=65536 → 200；65537 → 400
+  # 「max_tokens 不能超过 65536」）。声明后预检在本地就拦下越界请求，
+  # 省一次上游往返，客户端也不用看各家措辞不一的错误。
+  # 注意这是**已知上限**的厂商；其他厂商没探明前不臆造，留给
+  # precheck.maxTokensCeiling 全局天花板兜底。
+  # stepfun 家族（2026-09-23 实测 tools 可用后补声明——manual#267：面板 reachability
+  # 的『工具调用』列暴露了 step 全家族未声明，实测 5-preview/3.7-flash/3.5-flash/
+  # router-v1 均正常返回 tool_calls；不声明则引擎按无能力处理+面板显『—』）
+  step-5-preview: { tools: true }
+  step-3.7-flash: { tools: true }
+  step-3.5-flash: { tools: true }
+  step-3.5-flash-2603: { tools: true }
+  step-router-v1: { tools: true }
+
+# ── 档位阶梯：一家厂商**自家的**型号，竖着往下推 ──
+# 客户只用写一个名字（如 "flagship"），旗舰挂了自动退到下一档，依次往下。
+# 顺序按型号名里的档位排（3.0 > 2.5 > 2.0），不是实测的能力排名 —— 你实际用下来
+# 觉得该换，改这几行即可。
+#
+# 注意：agnes-2.5-pro / -alpha / -beta 对当前这把 key 是 403（清单里有、权限没有）。
+# 把它们放进阶梯只会让**每个请求先白跑一阶**再往下退，所以没放；
+# 升级套餐拿到权限后，把它们加到对应阶梯的最前面即可。
+modelLadders:
+  # Agnes 自家三档（2026-09-14 改成中文名）。
+  # ⚠️ 旧英文名 flagship / balanced / fast **不再保留** —— 两个库里 key 的 allowedModels
+  #    必须同步改成中文名，否则客户会拿到 404「模型不存在」（已同步）。
+  旗舰: [agnes-3.0-flash, agnes-2.5-flash, agnes-2.0-flash, mimo-v2.6-flash]   # 旗舰挂了 → 往下推 → MiMo 兜底
+  平衡: [agnes-2.5-flash, agnes-2.0-flash, agnes-3.0-flash]   # 同层先切，再向外
+  极速: [agnes-2.0-flash, agnes-2.5-flash, agnes-3.0-flash]   # 极速挂了 → 往上推
+  # ── MiMo 三档阶梯（2026-09-25 重排：极速/平衡/旗舰）───────────────────────
+  # v2.6 家族三款 + v2.5 两款，按能力分三档：
+  #   mimo-极速 → 速度优先：ultraspeed（最快）→ flash（快）→ v2.5（最轻）
+  #   mimo-平衡 → 均衡混搭：flash（v2.6 快）→ v2.5-pro（旧 pro）→ v2.6-pro（新旗舰兜底）
+  #   mimo-旗舰 → 质量优先：v2.6-pro（最强）→ v2.5-pro（旧 pro）→ flash（轻量兜底）
+  #   注：mimo-v2.6-pro-ultraspeed 首次实测吃过 429，暂只放极速档首位；
+  #       观察几天稳定后考虑加入旗舰/平衡档。
+  mimo-极速: [mimo-v2.6-pro-ultraspeed, mimo-v2.6-flash, mimo-v2.5]
+  mimo-平衡: [mimo-v2.6-flash, mimo-v2.5-pro, mimo-v2.6-pro]
+  mimo-旗舰: [mimo-v2.6-pro, mimo-v2.5-pro, mimo-v2.6-flash]
+  # ── 跨厂商兜底（可选）：Agnes 整条阶梯都不可用时落到 MiMo。────────────────
+  # 留着的理由很实在：Agnes 是免费档，一被限流就熔断，只靠 Agnes 就是"全模型不可用"
+  # ——你那次评测 556 个 503 正是这么来的。不想要跨厂商，把下面三行删掉即可。
+  旗舰-any: [agnes-3.0-flash, agnes-2.5-flash, agnes-2.0-flash, mimo-v2.6-pro, mimo-v2.5-pro, mimo-v2.6-flash, mimo-v2.5]
+  平衡-any: [agnes-2.5-flash, agnes-2.0-flash, agnes-3.0-flash, mimo-v2.6-flash, mimo-v2.5-pro, mimo-v2.6-pro]
+  极速-any: [agnes-2.0-flash, agnes-2.5-flash, agnes-3.0-flash, mimo-v2.6-pro-ultraspeed, mimo-v2.6-flash, mimo-v2.5]
+
+clients:
+  # key 一律只走环境变量，绝不带明文默认值：这个文件绑 0.0.0.0，明文 key 一旦被扫到就是白送的入口。
+  # 没设对应环境变量时校验会直接报错（fail-closed），而不是悄悄用一个猜得到的兜底值。
+  - id: free
+    label: 免费层（纯转发）
+    key: "{ENV:RELAY_KEY_FREE}"
+    tier: free
+    tenantId: demo
+    enabled: true
+  - id: standard
+    label: 标准层（归因走响应头）
+    key: "{ENV:RELAY_KEY_STANDARD}"
+    tier: standard
+    tenantId: demo
+    enabled: true
+  - id: pro
+    label: Pro 层（预检+归因全开+档位阶梯）
+    key: "{ENV:RELAY_KEY_PRO}"
+    tier: pro
+    tenantId: demo
+    enabled: true
+  - id: agent
+    label: 内部运维 Agent（自托管 LLM 闭环）
+    key: "{ENV:RELAY_KEY_AGENT}"
+    tier: pro
+    tenantId: agent
+    enabled: true
+
+lossReduction:
+  precheck:
+    enabled: true
+    onBlock: reject
+    # ── 消息条数上限（代码默认 512，太紧，已实测误杀）────────────────────
+    # 2026-09-14 事故：客户评测（pro 层，precheck=enforce）单请求带 621 条消息
+    # （586 KB，Agnes 实测 prompt_tokens=77469 完全吃得下，HTTP 200），
+    # 却被这条闸门 400 拦死（"messages 条数 621 超过网关上限 512"），
+    # 且 failure_reason 映射成 context_length_exceeded，看起来像"上下文超限"，
+    # 实际是**条数**超限 —— 客户侧表现为"连接/请求有问题"。
+    # 条数只是"别太离谱"的粗闸；真正的上下文约束应由上游和 contextWindow 路由把关。
+    # 体量上限另有 server.maxBodyBytes(8 MB) 兜底，所以这里放宽到 4096。
+    maxMessages: 4096
+  attribution:
+    enabled: true
+    autoRetry: 1
+    backoffBaseMs: 300
+    backoffMaxMs: 3000
+    # 连续 5 次失败即熔断该上游；30 秒冷却后允许一次"半开"试探：
+    #   试探成功 → 计数清零、立刻恢复主用（原厂修好了就自动切回来）
+    #   试探失败 → 立刻再次熔断 30 秒（不会拿客户请求去反复撞一个还没好的上游）
+    breakerThreshold: 5
+    breakerCooldownMs: 30000
+  meter:
+    enabled: true
+    retentionDays: 30
+  trace:
+    enabled: true
+
+# ============ 知识库（垂直 Agent 能力） ============
+# 每个客户/Agent 可以建独立知识库，灌入文档后通过 /v1/kb/{id}/ask
+# 让模型带上自己的知识作答。零外部依赖，SQLite 持久化。
+kb:
+  path: "data/kb.db"
+  chunkSize: 512
+  chunkOverlap: 64
+
+# ============ 内部 Agent 系统（自托管运维/迭代决策环） ============
+# Agent 调 LLM 走本网关自身 /v1/chat/completions（自证闭环），用上方 clients: 里 id: agent 的专用 key。
+# 该 key 走网关完整鉴权/预检/路由/归因/计量链路，Agent 产生的 token 用量自然落到 meter 里，按 agent 指纹可识别。
+agent:
+  enabled: true
+  # 用上方 clients: 里声明的 agent 专用 key 调 LLM（pro 层，降损全开，Agent 自证）
+  clientId: agent
+  # 模型：走网关 modelLadders。'default'/'fast' 都不在本网关已开通的模型清单内（会 model_unknown）。
+  # 用 '极速-any'（跨厂商兜底阶梯 agnes→mimo，实测 200 最稳）；也可换 '旗舰'/'极速'/'旗舰-any'。
+  model: "极速-any"
+  # 巡检周期：30 分钟一轮自动跑；0 = 只手动触发
+  intervalMs: 1800000
+  # 单轮 LLM 超时
+  llmTimeoutMs: 60000
+  # 自动巡检发现的迭代建议直接写 KB（迭代知识沉淀）
+  autoWriteKb: true
+  # 单轮最多喂给 LLM 的最近事件数
+  recentEvents: 30
+  # 迭代知识沉淀到哪个 KB（该 KB 需已存在；不存在则跳过回写不报错）
+  kbId: "kb-demo"

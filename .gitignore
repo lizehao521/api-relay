@@ -1,0 +1,61 @@
+node_modules/
+dist/
+data/
+*.log
+.env
+demo.log
+
+# 用户自己的配置文件（可能含明文密钥——虽然我们只生成 {ENV:...}，但人会手改）
+starter.yaml
+agnes.yaml
+relay.yaml
+config/relay.yaml
+
+# 自动生成的客户端 key（明文，勿提交）
+# ⚠️ 必须带 `*` 后缀：备份/临时副本（.relay-net.env.bak-20260914-2311 这种）同样是明文机密。
+#    2026-09-14 换 TokenRhythm key 时生成了一个 .bak，实测**没被忽略**，一次 git add -A 就泄。
+.relay-net.env*
+# 注：relay-net.yaml 现在是**入库**的（全部走 {ENV:...} 占位符，无明文），
+# 因为档位阶梯、超时、双栈监听这些运营决策需要可复现、可回溯。
+# 如果你哪天往里写了明文密钥，请立刻把它加回本文件并改走环境变量。
+
+# 进程文件
+*.pid
+
+# 运行日志与 keeper 单实例锁（本地运行状态，不入库）
+logs/
+
+# 对外凭据（明文，勿提交）
+.relay-external-key.txt*
+
+# 隧道运行时状态（地址会变，不入库）
+.relay-tunnel-url
+
+# 按厂商分配的对外凭据（明文，勿提交）
+.relay-vendor-keys.txt*
+
+# 出售用凭据（明文，勿提交）
+.relay-sale-key.txt*
+
+# 面板截图（生成物，不入库）
+docs/panel-shots/
+
+# 宣传图（生成物，不入库）
+docs/promo/
+
+# dynv6 DDNS（含明文 token，勿提交）
+.relay-dynv6.env*
+
+# Tailscale Funnel 公网地址（运行态）
+.relay-funnel-url
+/.hermess-snapshots
+
+# ==== 上传 GitHub 前补漏（git check-ignore 实测未被覆盖的文件）====
+# 按厂商/日期命名的对外凭据明文（历史命名不统一，统一按模式封死）
+.relay-*-key*.txt*
+# 运营配置的历史备份副本（含明文）—— 注意 .yaml 变体，模式必须双向覆盖
+relay-net*.bak-*
+# TLS 证书私钥与证书（含域名指纹，一律不入库）
+certs/
+# 本地快照仓（git-snapshot 后端，可重建）
+.hermess-snapshots/

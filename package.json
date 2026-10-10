@@ -1,0 +1,27 @@
+{
+  "name": "api-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "模型 API 聚合中转站：OpenAI 兼容网关 + 传话层工程降损（P2/P3/P8）",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --disable-warning=ExperimentalWarning dist/cli.js serve",
+    "dev": "tsc -p tsconfig.json && node --disable-warning=ExperimentalWarning dist/cli.js serve",
+    "mock": "node --disable-warning=ExperimentalWarning dist/cli.js mock",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json && node --disable-warning=ExperimentalWarning --test \"dist/test/*.test.js\"",
+    "check": "node --disable-warning=ExperimentalWarning dist/cli.js check",
+    "report": "node --disable-warning=ExperimentalWarning dist/cli.js report",
+    "e2e": "node --disable-warning=ExperimentalWarning --test \"dist/test/e2e.test.js\"",
+    "demo": "tsc -p tsconfig.json && node --disable-warning=ExperimentalWarning dist/cli.js demo"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

@@ -4,7 +4,8 @@
 
 ## 硬读数（可执行面实测，非估算）
 
-- `npm test` → exitCode 0，261 tests 全绿（16 文件），935 条断言
+- `npm test` → exitCode 0，**269 tests 全绿**（16 文件），0 失败
+  - ⚠ 本条经父 agent 复核修正：初版报告写 261，实测运行态 `ℹ tests 269 / pass 269 / fail 0` 且静态 `test()` 调用数逐文件合计亦为 269，双通道吻合，以 269 为准。
 - `npm run typecheck` → exitCode 0（strict + noUncheckedIndexedAccess + noImplicitOverride 全开）
 - `code-audit dup`(src 全量) → duplicateFileCount: 0，零重复文件
 - `@ts-ignore` / `@ts-expect-error` / `eslint-disable` → 0 处

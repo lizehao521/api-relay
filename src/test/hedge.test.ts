@@ -5,7 +5,7 @@
  * 谁先成功用谁；主线路在宽限内就成功/失败时行为与旧版一致（不多等、不冗余）。
  */
 import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { rmTmp } from './testcleanup.js';import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -81,7 +81,7 @@ async function bootTwo(opts: { hedgeDelayMs: number; scenarioA?: MockScenario; s
       await app.shutdown();
       await mockA.close();
       await mockB.close();
-      rmSync(dir, { recursive: true, force: true });
+      await rmTmp(dir);
     },
   };
 }

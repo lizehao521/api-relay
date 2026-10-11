@@ -13,7 +13,7 @@
  */
 
 import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { rmTmp } from './testcleanup.js';import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -135,7 +135,7 @@ test('失败归因跨重启：byFailureReason / clientAuth 不能只有内存那
       await s2.close();
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 
@@ -161,7 +161,7 @@ test('内存实现与 SQL 实现的桶名必须逐字一致（曾经是 "unknown
       await sql.close();
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 
@@ -387,7 +387,7 @@ test('预算必须落库：进程重启后 ¥10 额度还在（老库缺列时�
       await s2.close();
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 
@@ -420,7 +420,7 @@ test('时序分桶必须真的按 bucketMs 聚合，不能退化成"每条记录
       await s.close();
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 
@@ -511,7 +511,7 @@ test('额度快照按精确时间聚合：月中重置后不能再算上重置�
       await sql.close();
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 
@@ -537,7 +537,7 @@ test('额度快照不能因为「库还没 flush」而返回 0（缓存必须存
       await sql.close();
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 
@@ -565,6 +565,6 @@ test('flush 失败不能丢账：记录必须重新入队等下次重试', async
       await sql.close();
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });

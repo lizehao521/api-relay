@@ -1,0 +1,1359 @@
+
+> api-relay@0.1.0 test
+> tsc -p tsconfig.json && node --experimental-sqlite --disable-warning=ExperimentalWarning --test "dist/test/*.test.js"
+
+TAP version 13
+# Subtest: agent: parseDecision 解析标准 JSON
+ok 1 - agent: parseDecision 解析标准 JSON
+  ---
+  duration_ms: 2.3669
+  ...
+# Subtest: agent: parseDecision 容错前后杂字
+ok 2 - agent: parseDecision 容错前后杂字
+  ---
+  duration_ms: 1.3296
+  ...
+# Subtest: agent: 非法 JSON 抛错
+ok 3 - agent: 非法 JSON 抛错
+  ---
+  duration_ms: 1.938
+  ...
+# Subtest: agent: kind 非法时回退 none + confidence 夹紧
+ok 4 - agent: kind 非法时回退 none + confidence 夹紧
+  ---
+  duration_ms: 0.2213
+  ...
+# Subtest: agent: run 全链路（mock LLM + 真 KB 回写）
+ok 5 - agent: run 全链路（mock LLM + 真 KB 回写）
+  ---
+  duration_ms: 238.8882
+  ...
+# Subtest: agent: LLM 输出坏 JSON 时 ok=false 且不写 KB
+ok 6 - agent: LLM 输出坏 JSON 时 ok=false 且不写 KB
+  ---
+  duration_ms: 96.9127
+  ...
+# Subtest: agent: 并发保护（第二轮回 already_running）
+ok 7 - agent: 并发保护（第二轮回 already_running）
+  ---
+  duration_ms: 0.8285
+  ...
+# Subtest: 429 + Retry-After 头 → 可恢复 + 退避重试 + 具体等待毫秒
+ok 8 - 429 + Retry-After 头 → 可恢复 + 退避重试 + 具体等待毫秒
+  ---
+  duration_ms: 6.8661
+  ...
+# Subtest: 余额不足优先于限流：即使 HTTP 是 429，也必须判定为不可重试
+ok 9 - 余额不足优先于限流：即使 HTTP 是 429，也必须判定为不可重试
+  ---
+  duration_ms: 0.8869
+  ...
+# Subtest: SiliconFlow 风格（无 error 包裹层）也能归因
+ok 10 - SiliconFlow 风格（无 error 包裹层）也能归因
+  ---
+  duration_ms: 1.4896
+  ...
+# Subtest: OpenRouter 风格（code 为数字 HTTP 状态码）也能命中限流
+ok 11 - OpenRouter 风格（code 为数字 HTTP 状态码）也能命中限流
+  ---
+  duration_ms: 0.4857
+  ...
+# Subtest: 401 → 密钥问题（不可恢复，且不引导用户重试）
+ok 12 - 401 → 密钥问题（不可恢复，且不引导用户重试）
+  ---
+  duration_ms: 1.0604
+  ...
+# Subtest: 模型不存在 → 建议换模型，并指出这是上游不认识该名称
+ok 13 - 模型不存在 → 建议换模型，并指出这是上游不认识该名称
+  ---
+  duration_ms: 0.5011
+  ...
+# Subtest: 上下文超限 → reduce_context（而不是让用户重试同一个请求）
+ok 14 - 上下文超限 → reduce_context（而不是让用户重试同一个请求）
+  ---
+  duration_ms: 0.7575
+  ...
+# Subtest: 内容过滤 → 必须改写输入（原样重试不可能成功）
+ok 15 - 内容过滤 → 必须改写输入（原样重试不可能成功）
+  ---
+  duration_ms: 0.2339
+  ...
+# Subtest: HTTP 200 + content_filter 信号：只标记不改写响应
+ok 16 - HTTP 200 + content_filter 信号：只标记不改写响应
+  ---
+  duration_ms: 0.7989
+  ...
+# Subtest: 网络层错误按错误码分类（ECONNREFUSED → 网络；ETIMEDOUT → 超时）
+ok 17 - 网络层错误按错误码分类（ECONNREFUSED → 网络；ETIMEDOUT → 超时）
+  ---
+  duration_ms: 0.6746
+  ...
+# Subtest: 客户端断开不归因为上游故障（避免误导重试）
+ok 18 - 客户端断开不归因为上游故障（避免误导重试）
+  ---
+  duration_ms: 0.3001
+  ...
+# Subtest: relay 自身异常被显式标注为 relay 侧问题
+ok 19 - relay 自身异常被显式标注为 relay 侧问题
+  ---
+  duration_ms: 0.1962
+  ...
+# Subtest: 未知错误兜底：不猜，按状态码给最小可信结论
+ok 20 - 未知错误兜底：不猜，按状态码给最小可信结论
+  ---
+  duration_ms: 0.8016
+  ...
+# Subtest: HTML 错误页（502 Bad Gateway）不会让归因崩，也不会外泄整页 HTML
+ok 21 - HTML 错误页（502 Bad Gateway）不会让归因崩，也不会外泄整页 HTML
+  ---
+  duration_ms: 0.7127
+  ...
+# Subtest: parseRetryAfterMs 支持秒、HTTP 日期、复合时长与响应体提示
+ok 22 - parseRetryAfterMs 支持秒、HTTP 日期、复合时长与响应体提示
+  ---
+  duration_ms: 0.4231
+  ...
+# Subtest: 归因卡片是纯函数：相同输入两次结果一致（可安全记忆化）
+ok 23 - 归因卡片是纯函数：相同输入两次结果一致（可安全记忆化）
+  ---
+  duration_ms: 1.1825
+  ...
+# Subtest: 缓存键覆盖全部会影响判定的输入（避免记忆化返回错误结论）
+ok 24 - 缓存键覆盖全部会影响判定的输入（避免记忆化返回错误结论）
+  ---
+  duration_ms: 0.2517
+  ...
+# Subtest: 记忆化分类器：命中缓存时不再消耗耗时，且结论一致
+ok 25 - 记忆化分类器：命中缓存时不再消耗耗时，且结论一致
+  ---
+  duration_ms: 0.6175
+  ...
+# Subtest: 低置信度结果不进入缓存（避免把兜底结论固化成事实）
+ok 26 - 低置信度结果不进入缓存（避免把兜底结论固化成事实）
+  ---
+  duration_ms: 0.3443
+  ...
+# Subtest: 中文错误文案也能归因：无效的令牌 / 未提供令牌 / 余额不足 / 限流
+ok 27 - 中文错误文案也能归因：无效的令牌 / 未提供令牌 / 余额不足 / 限流
+  ---
+  duration_ms: 1.7051
+  ...
+# Subtest: 403 是模型级问题 → 建议换模型且可恢复；401 是凭据问题 → 建议修凭据
+ok 28 - 403 是模型级问题 → 建议换模型且可恢复；401 是凭据问题 → 建议修凭据
+  ---
+  duration_ms: 0.8756
+  ...
+# Subtest: 403 的内容安全与权限两种语义必须分开归因（同一个状态码，处置完全不同）
+ok 29 - 403 的内容安全与权限两种语义必须分开归因（同一个状态码，处置完全不同）
+  ---
+  duration_ms: 0.9561
+  ...
+# Subtest: 失败归因跨重启：byFailureReason / clientAuth 不能只有内存那几条
+ok 30 - 失败归因跨重启：byFailureReason / clientAuth 不能只有内存那几条
+  ---
+  duration_ms: 2871.4967
+  ...
+# Subtest: 内存实现与 SQL 实现的桶名必须逐字一致（曾经是 "unknown" vs ""）
+ok 31 - 内存实现与 SQL 实现的桶名必须逐字一致（曾经是 "unknown" vs ""）
+  ---
+  duration_ms: 5103.8511
+  ...
+# Subtest: 鉴权失败的 401 文案必须带指纹，且指纹能对上"已签发 key"列表
+ok 32 - 鉴权失败的 401 文案必须带指纹，且指纹能对上"已签发 key"列表
+  ---
+  duration_ms: 5.5083
+  ...
+# Subtest: 同一种错 key 刷 200 次只聚成一行；不同 key 分开记
+ok 33 - 同一种错 key 刷 200 次只聚成一行；不同 key 分开记
+  ---
+  duration_ms: 7.6663
+  ...
+# Subtest: 提交形态可分辨：没带 key / 裸 key（少写 Bearer）/ 标准 Bearer
+ok 34 - 提交形态可分辨：没带 key / 裸 key（少写 Bearer）/ 标准 Bearer
+  ---
+  duration_ms: 1.2229
+  ...
+# Subtest: key 自检（whoami）：有效 / 已禁用 / 已过期 / 不是这里签发的 四种结论
+ok 35 - key 自检（whoami）：有效 / 已禁用 / 已过期 / 不是这里签发的 四种结论
+  ---
+  duration_ms: 0.5993
+  ...
+# Subtest: 被禁用的 key：401 说法必须是"已禁用"，且指纹命中已签发列表
+ok 36 - 被禁用的 key：401 说法必须是"已禁用"，且指纹命中已签发列表
+  ---
+  duration_ms: 1.622
+  ...
+# Subtest: 客户端缺 tier：校验给出明确错误，而不是让渲染层崩在 padEnd 上
+ok 37 - 客户端缺 tier：校验给出明确错误，而不是让渲染层崩在 padEnd 上
+  ---
+  duration_ms: 1.0372
+  ...
+# Subtest: 看板内嵌脚本语法正确，且带上鉴权自检入口
+ok 38 - 看板内嵌脚本语法正确，且带上鉴权自检入口
+  ---
+  duration_ms: 6.3189
+  ...
+# Subtest: 客户端 key 是空串：必须给告警，不能静默注册一个永远用不了的 key
+ok 39 - 客户端 key 是空串：必须给告警，不能静默注册一个永远用不了的 key
+  ---
+  duration_ms: 0.6898
+  ...
+# Subtest: 预算用尽必须按钱拦住，且返回 402 而不是 429（别让客户端无效重试）
+ok 40 - 预算用尽必须按钱拦住，且返回 402 而不是 429（别让客户端无效重试）
+  ---
+  duration_ms: 0.8931
+  ...
+# Subtest: 预算与 token 额度互不干扰：只设预算时不能因为 token 数小而提前拦
+ok 41 - 预算与 token 额度互不干扰：只设预算时不能因为 token 数小而提前拦
+  ---
+  duration_ms: 0.4081
+  ...
+# Subtest: 额度用量口径同时给出 token 与金额两种进度
+ok 42 - 额度用量口径同时给出 token 与金额两种进度
+  ---
+  duration_ms: 0.5809
+  ...
+# Subtest: 预算必须落库：进程重启后 ¥10 额度还在（老库缺列时靠迁移补上）
+ok 43 - 预算必须落库：进程重启后 ¥10 额度还在（老库缺列时靠迁移补上）
+  ---
+  duration_ms: 612.8635
+  ...
+# Subtest: 时序分桶必须真的按 bucketMs 聚合，不能退化成"每条记录一个桶"
+ok 44 - 时序分桶必须真的按 bucketMs 聚合，不能退化成"每条记录一个桶"
+  ---
+  duration_ms: 10136.8137
+  ...
+# Subtest: 降损层开销比必须是同口径平均值之比，不能因为样本数错配而爆表
+ok 45 - 降损层开销比必须是同口径平均值之比，不能因为样本数错配而爆表
+  ---
+  duration_ms: 2.2296
+  ...
+# Subtest: 模型名不存在 → 404 model_not_found，并给出拼写建议与可用清单
+ok 46 - 模型名不存在 → 404 model_not_found，并给出拼写建议与可用清单
+  ---
+  duration_ms: 1.5792
+  ...
+# Subtest: 模型存在但白名单没有 → 403 model_not_allowed（与"不存在"分开）
+ok 47 - 模型存在但白名单没有 → 403 model_not_allowed（与"不存在"分开）
+  ---
+  duration_ms: 0.4425
+  ...
+# Subtest: 拼写建议：太不像就不猜（宁可不建议，也别给更误导的）
+ok 48 - 拼写建议：太不像就不猜（宁可不建议，也别给更误导的）
+  ---
+  duration_ms: 0.9872
+  ...
+# Subtest: 额度快照按精确时间聚合：月中重置后不能再算上重置前的用量
+ok 49 - 额度快照按精确时间聚合：月中重置后不能再算上重置前的用量
+  ---
+  duration_ms: 4492.3572
+  ...
+# Subtest: 额度快照不能因为「库还没 flush」而返回 0（缓存必须存解析后的值）
+ok 50 - 额度快照不能因为「库还没 flush」而返回 0（缓存必须存解析后的值）
+  ---
+  duration_ms: 10042.6253
+  ...
+# Subtest: flush 失败不能丢账：记录必须重新入队等下次重试
+ok 51 - flush 失败不能丢账：记录必须重新入队等下次重试
+  ---
+  duration_ms: 37.3385
+  ...
+# Subtest: limiter: 释放一个额度不超发（active 不越过 limit）
+ok 52 - limiter: 释放一个额度不超发（active 不越过 limit）
+  ---
+  duration_ms: 3.1273
+  ...
+# Subtest: parseYaml: 嵌套映射、序列、标量类型
+ok 53 - parseYaml: 嵌套映射、序列、标量类型
+  ---
+  duration_ms: 4.2359
+  ...
+# Subtest: parseYaml: https:// 不会被误判为键分隔符
+ok 54 - parseYaml: https:// 不会被误判为键分隔符
+  ---
+  duration_ms: 0.3438
+  ...
+# Subtest: parseYaml: 注释剥离与块标量
+ok 55 - parseYaml: 注释剥离与块标量
+  ---
+  duration_ms: 0.5304
+  ...
+# Subtest: parseYaml: Tab 缩进应显式报错而不是静默错读
+ok 56 - parseYaml: Tab 缩进应显式报错而不是静默错读
+  ---
+  duration_ms: 0.8575
+  ...
+# Subtest: parseYaml: 序列项是流式对象（- {k: v}）不能被花括号里的冒号切碎
+ok 57 - parseYaml: 序列项是流式对象（- {k: v}）不能被花括号里的冒号切碎
+  ---
+  duration_ms: 0.787
+  ...
+# Subtest: parseYaml: 同一份流式对象，写成序列项或写成键值，结果必须一致
+ok 58 - parseYaml: 同一份流式对象，写成序列项或写成键值，结果必须一致
+  ---
+  duration_ms: 0.4386
+  ...
+# Subtest: parseYaml: 未闭合的行内集合报错，而不是静默截断
+ok 59 - parseYaml: 未闭合的行内集合报错，而不是静默截断
+  ---
+  duration_ms: 0.3174
+  ...
+# Subtest: parseYaml: 行内集合已占满序列项，后面再挂同项其它键应报错
+ok 60 - parseYaml: 行内集合已占满序列项，后面再挂同项其它键应报错
+  ---
+  duration_ms: 0.7997
+  ...
+# Subtest: interpolateEnv: 必需缺失报错、可选回落默认值
+ok 61 - interpolateEnv: 必需缺失报错、可选回落默认值
+  ---
+  duration_ms: 0.8664
+  ...
+# Subtest: interpolateTree: 递归处理数组与对象
+ok 62 - interpolateTree: 递归处理数组与对象
+  ---
+  duration_ms: 0.7042
+  ...
+# Subtest: deepMerge: 数组整体替换、对象递归合并
+ok 63 - deepMerge: 数组整体替换、对象递归合并
+  ---
+  duration_ms: 0.4503
+  ...
+# Subtest: loadConfig: 示例配置可被自身解析（防文档漂移）
+ok 64 - loadConfig: 示例配置可被自身解析（防文档漂移）
+  ---
+  duration_ms: 7.0911
+  ...
+# Subtest: loadConfig: 缺少必需环境变量时装载失败（不允许静默空密钥）
+ok 65 - loadConfig: 缺少必需环境变量时装载失败（不允许静默空密钥）
+  ---
+  duration_ms: 2.3292
+  ...
+# Subtest: loadConfig: 环境变量覆盖优先级高于文件
+ok 66 - loadConfig: 环境变量覆盖优先级高于文件
+  ---
+  duration_ms: 2.818
+  ...
+# Subtest: inspectConfig: 捕获重复上游 id、非法 baseUrl、空供应商
+ok 67 - inspectConfig: 捕获重复上游 id、非法 baseUrl、空供应商
+  ---
+  duration_ms: 0.7657
+  ...
+# Subtest: inspectConfig: smartRouting 无成本数据时给出告警
+ok 68 - inspectConfig: smartRouting 无成本数据时给出告警
+  ---
+  duration_ms: 0.3649
+  ...
+# Subtest: e2e: 健康检查与根路由可用（无需鉴权）
+ok 69 - e2e: 健康检查与根路由可用（无需鉴权）
+  ---
+  duration_ms: 132.4906
+  ...
+# Subtest: e2e: GET /v1/models 返回 OpenAI 兼容的模型清单
+ok 70 - e2e: GET /v1/models 返回 OpenAI 兼容的模型清单
+  ---
+  duration_ms: 15977.8696
+  ...
+# Subtest: e2e: 归因目录可被客户端预先拉取
+ok 71 - e2e: 归因目录可被客户端预先拉取
+  ---
+  duration_ms: 627.7151
+  ...
+# Subtest: e2e: 缺少鉴权头返回 401，且响应体是 OpenAI 兼容形状
+ok 72 - e2e: 缺少鉴权头返回 401，且响应体是 OpenAI 兼容形状
+  ---
+  duration_ms: 3947.5977
+  ...
+# Subtest: e2e: 非流式成功请求（含模型别名与用量）
+ok 73 - e2e: 非流式成功请求（含模型别名与用量）
+  ---
+  duration_ms: 659.9633
+  ...
+# Subtest: e2e: 流式 SSE 线路格式正确（data: 前缀、空行分隔、[DONE] 结尾）
+ok 74 - e2e: 流式 SSE 线路格式正确（data: 前缀、空行分隔、[DONE] 结尾）
+  ---
+  duration_ms: 2147.7623
+  ...
+# Subtest: e2e: 长 TTFB 流式先提前提交 200 + 心跳，真实流仍完整透传
+ok 75 - e2e: 长 TTFB 流式先提前提交 200 + 心跳，真实流仍完整透传
+  ---
+  duration_ms: 5060.7743
+  ...
+# Subtest: e2e: 未开启提前提交时流式行为不变（首帧仍是 data）
+ok 76 - e2e: 未开启提前提交时流式行为不变（首帧仍是 data）
+  ---
+  duration_ms: 6013.5442
+  ...
+# Subtest: e2e: 错误响应带归因（pro 层 full 模式）
+ok 77 - e2e: 错误响应带归因（pro 层 full 模式）
+  ---
+  duration_ms: 560.3011
+  ...
+# Subtest: e2e: 未知端点与非 POST 方法给出明确错误
+ok 78 - e2e: 未知端点与非 POST 方法给出明确错误
+  ---
+  duration_ms: 3736.8775
+  ...
+# Subtest: e2e: 管理接口在未带令牌时拒绝远程语义（本机无令牌时放行）
+ok 79 - e2e: 管理接口在未带令牌时拒绝远程语义（本机无令牌时放行）
+  ---
+  duration_ms: 104.2383
+  ...
+# Subtest: e2e: 管理接口能读到度量、上游健康、key 与轨迹
+ok 80 - e2e: 管理接口能读到度量、上游健康、key 与轨迹
+  ---
+  duration_ms: 124.0684
+  ...
+# Subtest: e2e: 运营动作可禁用/恢复上游（无需重启）
+ok 81 - e2e: 运营动作可禁用/恢复上游（无需重启）
+  ---
+  duration_ms: 5123.4968
+  ...
+# Subtest: e2e: 面板可创建 key，明文只返回一次，且新 key 立即可用
+ok 82 - e2e: 面板可创建 key，明文只返回一次，且新 key 立即可用
+  ---
+  duration_ms: 135.7155
+  ...
+# Subtest: e2e: 面板可改分层/模型白名单、轮换、禁用、重置额度
+ok 83 - e2e: 面板可改分层/模型白名单、轮换、禁用、重置额度
+  ---
+  duration_ms: 7029.6797
+  ...
+# Subtest: e2e: 面板写操作全部进事件流（可审计）
+ok 84 - e2e: 面板写操作全部进事件流（可审计）
+  ---
+  duration_ms: 9430.7042
+  ...
+# Subtest: e2e: 降损层开关热更新后立刻生效（关闭预检即不再拦截）
+ok 85 - e2e: 降损层开关热更新后立刻生效（关闭预检即不再拦截）
+  ---
+  duration_ms: 751.1327
+  ...
+# Subtest: e2e: 面板权限边界——无令牌不能做任何写操作
+ok 86 - e2e: 面板权限边界——无令牌不能做任何写操作
+  ---
+  duration_ms: 264.2856
+  ...
+# Subtest: e2e: SQLite 持久化——重启后仍能读到历史度量
+ok 87 - e2e: SQLite 持久化——重启后仍能读到历史度量
+  ---
+  duration_ms: 316.7564
+  ...
+# Subtest: e2e: 多 key 池在某个 key 被拒时自动轮换（用户无感，内部两次请求）
+ok 88 - e2e: 多 key 池在某个 key 被拒时自动轮换（用户无感，内部两次请求）
+  ---
+  duration_ms: 251.0719
+  ...
+# Subtest: e2e: /v1/quota 无需令牌即可读，且只暴露计数不暴露密钥
+ok 89 - e2e: /v1/quota 无需令牌即可读，且只暴露计数不暴露密钥
+  ---
+  duration_ms: 6439.8277
+  ...
+# Subtest: e2e: 可用 publicQuota=false 关闭公开端点
+ok 90 - e2e: 可用 publicQuota=false 关闭公开端点
+  ---
+  duration_ms: 9244.8778
+  ...
+# Subtest: e2e: /v1/quota 的窗口计数走 SQLite，重启后不归零
+ok 91 - e2e: /v1/quota 的窗口计数走 SQLite，重启后不归零
+  ---
+  duration_ms: 4047.8861
+  ...
+# Subtest: e2e: /v1/panel 一次给齐各视图数据
+ok 92 - e2e: /v1/panel 一次给齐各视图数据
+  ---
+  duration_ms: 6663.1951
+  ...
+# Subtest: e2e: /v1/panel 绝不泄漏 hashPrefix 与任何密钥
+ok 93 - e2e: /v1/panel 绝不泄漏 hashPrefix 与任何密钥
+  ---
+  duration_ms: 217.6763
+  ...
+# Subtest: e2e: /v1/panel 的轨迹跨重启仍可回看
+ok 94 - e2e: /v1/panel 的轨迹跨重启仍可回看
+  ---
+  duration_ms: 7779.8917
+  ...
+# Subtest: e2e: 客户端拿错 key 时，面板要能指出"是 key 不对"而不是让人以为服务挂了
+ok 95 - e2e: 客户端拿错 key 时，面板要能指出"是 key 不对"而不是让人以为服务挂了
+  ---
+  duration_ms: 940.3656
+  ...
+# Subtest: e2e: 面板设的「预算(元)」必须跨重启仍在（逐字段映射最容易漏）
+ok 96 - e2e: 面板设的「预算(元)」必须跨重启仍在（逐字段映射最容易漏）
+  ---
+  duration_ms: 3130.3471
+  ...
+# Subtest: e2e: 流式整体超时必须真的咬人（上游慢慢流也会被截断）
+ok 97 - e2e: 流式整体超时必须真的咬人（上游慢慢流也会被截断）
+  ---
+  duration_ms: 6617.4659
+  ...
+# Subtest: 成功响应：优先选择高优先级上游，且响应体原样透传
+ok 98 - 成功响应：优先选择高优先级上游，且响应体原样透传
+  ---
+  duration_ms: 72.3499
+  ...
+# Subtest: 成功响应可被客户端用 nonce 验证未被篡改
+ok 99 - 成功响应可被客户端用 nonce 验证未被篡改
+  ---
+  duration_ms: 15.3759
+  ...
+# Subtest: 模型别名：上游回显被改写回客户端请求的模型名
+ok 100 - 模型别名：上游回显被改写回客户端请求的模型名
+  ---
+  duration_ms: 13.8673
+  ...
+# Subtest: 流式：SSE 逐帧透传（含 [DONE]），且 model 被改写回请求名
+ok 101 - 流式：SSE 逐帧透传（含 [DONE]），且 model 被改写回请求名
+  ---
+  duration_ms: 151.8194
+  ...
+# Subtest: 可恢复错误（429）：自动切换到备用上游，并在轨迹中留下证据
+ok 102 - 可恢复错误（429）：自动切换到备用上游，并在轨迹中留下证据
+  ---
+  duration_ms: 32.5951
+  ...
+# Subtest: 不可恢复错误（401）：立即返回，不做任何自动重试
+ok 103 - 不可恢复错误（401）：立即返回，不做任何自动重试
+  ---
+  duration_ms: 10.7689
+  ...
+# Subtest: 不可恢复错误（内容过滤）：透传上游错误体 + 附带归因，且建议改写输入
+ok 104 - 不可恢复错误（内容过滤）：透传上游错误体 + 附带归因，且建议改写输入
+  ---
+  duration_ms: 12.5173
+  ...
+# Subtest: 全部上游都失败：返回可归因错误而不是空壳 500
+ok 105 - 全部上游都失败：返回可归因错误而不是空壳 500
+  ---
+  duration_ms: 223.1507
+  ...
+# Subtest: 熔断：同一上游连续失败达到阈值后被摘除，后续请求不再打到它
+ok 106 - 熔断：同一上游连续失败达到阈值后被摘除，后续请求不再打到它
+  ---
+  duration_ms: 23.7952
+  ...
+# Subtest: 预检拦截畸形 tool_calls：上游请求数为 0（真正的"省一次往返"）
+ok 107 - 预检拦截畸形 tool_calls：上游请求数为 0（真正的"省一次往返"）
+  ---
+  duration_ms: 4.4699
+  ...
+# Subtest: 预检逃生舱：X-Relay-Precheck: off 时放行并如实记录
+ok 108 - 预检逃生舱：X-Relay-Precheck: off 时放行并如实记录
+  ---
+  duration_ms: 10.1299
+  ...
+# Subtest: 标准层 observe：只记录不拦截（同一请求在 pro 层被拦、在 standard 层放行）
+ok 109 - 标准层 observe：只记录不拦截（同一请求在 pro 层被拦、在 standard 层放行）
+  ---
+  duration_ms: 8.0474
+  ...
+# Subtest: 免费层 attribution=off：错误体里不带归因（守"纯管道"承诺）
+ok 110 - 免费层 attribution=off：错误体里不带归因（守"纯管道"承诺）
+  ---
+  duration_ms: 7.3974
+  ...
+# Subtest: 标准层 attribution=header：错误体保持原样，归因只进响应头
+ok 111 - 标准层 attribution=header：错误体保持原样，归因只进响应头
+  ---
+  duration_ms: 6.6194
+  ...
+# Subtest: 无效 key：401 且给出可执行建议
+ok 112 - 无效 key：401 且给出可执行建议
+  ---
+  duration_ms: 4.1986
+  ...
+# Subtest: 额度耗尽返回 402 而非 429（避免 Agent 框架对 RateLimitError 疯狂重试）
+ok 113 - 额度耗尽返回 402 而非 429（避免 Agent 框架对 RateLimitError 疯狂重试）
+  ---
+  duration_ms: 9.7516
+  ...
+# Subtest: 白名单外的模型：不存在 → 404"名字写错了"，存在但没开通 → 403"去开通"
+ok 114 - 白名单外的模型：不存在 → 404"名字写错了"，存在但没开通 → 403"去开通"
+  ---
+  duration_ms: 4.7882
+  ...
+# Subtest: 无路由可用：返回 503 且列出被拒上游与原因
+ok 115 - 无路由可用：返回 503 且列出被拒上游与原因
+  ---
+  duration_ms: 3.4949
+  ...
+# Subtest: 度量记录：成功请求的 token、成本、客户端类型与降损开销都落库
+ok 116 - 度量记录：成功请求的 token、成本、客户端类型与降损开销都落库
+  ---
+  duration_ms: 14.3423
+  ...
+# Subtest: 度量记录：错误请求的归因与建议动作进入维度统计
+ok 117 - 度量记录：错误请求的归因与建议动作进入维度统计
+  ---
+  duration_ms: 14.6167
+  ...
+# Subtest: P8 流式计量：网关自动注入 include_usage，token 不再记成 0，且那一帧不透传给客户端
+ok 118 - P8 流式计量：网关自动注入 include_usage，token 不再记成 0，且那一帧不透传给客户端
+  ---
+  duration_ms: 131.2716
+  ...
+# Subtest: P8 流式计量：客户端自己要过 usage 时不重复注入，也不扣下那一帧
+ok 119 - P8 流式计量：客户端自己要过 usage 时不重复注入，也不扣下那一帧
+  ---
+  duration_ms: 141.2268
+  ...
+# Subtest: P8 流式计量：非流式请求不注入 stream_options（不给上游塞无用字段）
+ok 120 - P8 流式计量：非流式请求不注入 stream_options（不给上游塞无用字段）
+  ---
+  duration_ms: 7.1254
+  ...
+# Subtest: 成本口径：modelCosts 覆盖实付价，listCost 独立记牌面价（两个口径互不冒充）
+ok 121 - 成本口径：modelCosts 覆盖实付价，listCost 独立记牌面价（两个口径互不冒充）
+  ---
+  duration_ms: 7.0038
+  ...
+# Subtest: 成本口径：没配 listCost 时牌面价取实付价（不留空，这一列永远可比）
+ok 122 - 成本口径：没配 listCost 时牌面价取实付价（不留空，这一列永远可比）
+  ---
+  duration_ms: 5.918
+  ...
+# Subtest: 成本口径：modelCosts 没命中该型号时回退厂商级价
+ok 123 - 成本口径：modelCosts 没命中该型号时回退厂商级价
+  ---
+  duration_ms: 5.7444
+  ...
+# Subtest: 成本口径：按模型拆分也带两个口径（不只是总数有）
+ok 124 - 成本口径：按模型拆分也带两个口径（不只是总数有）
+  ---
+  duration_ms: 7.7398
+  ...
+# Subtest: 恶意/畸形请求体不会打崩引擎
+ok 125 - 恶意/畸形请求体不会打崩引擎
+  ---
+  duration_ms: 2.4233
+  ...
+# Subtest: 上游因密钥问题熔断后，归因必须指向根因而不是"模型不存在"
+ok 126 - 上游因密钥问题熔断后，归因必须指向根因而不是"模型不存在"
+  ---
+  duration_ms: 7.6216
+  ...
+# Subtest: 确实是"没有上游声明该模型"时，仍然要说成模型问题（别修过头）
+ok 127 - 确实是"没有上游声明该模型"时，仍然要说成模型问题（别修过头）
+  ---
+  duration_ms: 2.8942
+  ...
+# Subtest: 阶梯：旗舰失败自动降到下一阶，任务仍然完成，并声明实际服务的模型
+ok 128 - 阶梯：旗舰失败自动降到下一阶，任务仍然完成，并声明实际服务的模型
+  ---
+  duration_ms: 221.1968
+  ...
+# Subtest: 阶梯：极速失败往上升（方向由配置决定，不是写死的单向降级）
+ok 129 - 阶梯：极速失败往上升（方向由配置决定，不是写死的单向降级）
+  ---
+  duration_ms: 218.7597
+  ...
+# Subtest: 阶梯：带 tools 的请求会跳过声明 tools:false 的模型（切过去任务会废）
+ok 130 - 阶梯：带 tools 的请求会跳过声明 tools:false 的模型（切过去任务会废）
+  ---
+  duration_ms: 8.3902
+  ...
+# Subtest: 阶梯：模型级 403 推进阶梯，但不会把整个供应商判死（实测教训）
+ok 131 - 阶梯：模型级 403 推进阶梯，但不会把整个供应商判死（实测教训）
+  ---
+  duration_ms: 21.8707
+  ...
+# Subtest: 阶梯：请求级错误不换模型（换谁都会同样失败，该让客户改请求）
+ok 132 - 阶梯：请求级错误不换模型（换谁都会同样失败，该让客户改请求）
+  ---
+  duration_ms: 7.11
+  ...
+# Subtest: 阶梯：整条阶梯都不可达时返回可归因的 503，而不是空壳 500
+ok 133 - 阶梯：整条阶梯都不可达时返回可归因的 503，而不是空壳 500
+  ---
+  duration_ms: 3.0735
+  ...
+# Subtest: 阶梯：阶梯名会进对外模型清单（否则预检会把它当未知模型拦掉）
+ok 134 - 阶梯：阶梯名会进对外模型清单（否则预检会把它当未知模型拦掉）
+  ---
+  duration_ms: 2.8049
+  ...
+# Subtest: 阶梯：配置校验会对不可达的阶与缺失的能力表给出告警
+ok 135 - 阶梯：配置校验会对不可达的阶与缺失的能力表给出告警
+  ---
+  duration_ms: 2.9126
+  ...
+# Subtest: 上游被禁用时请求它声明的模型：不能说"网关不认识模型"，要说"上游不可用"
+ok 136 - 上游被禁用时请求它声明的模型：不能说"网关不认识模型"，要说"上游不可用"
+  ---
+  duration_ms: 2.6094
+  ...
+# Subtest: 模型真的不存在时仍然是 model_unknown（别把两件事混为一谈）
+ok 137 - 模型真的不存在时仍然是 model_unknown（别把两件事混为一谈）
+  ---
+  duration_ms: 2.8644
+  ...
+# Subtest: /v1/models 只列此刻能服务的模型（禁用上游的模型不出现）
+ok 138 - /v1/models 只列此刻能服务的模型（禁用上游的模型不出现）
+  ---
+  duration_ms: 3.0058
+  ...
+# Subtest: 流式请求的耗时必须是正数（曾经把单调钟减了墙上钟，写出 -1.7e12）
+ok 139 - 流式请求的耗时必须是正数（曾经把单调钟减了墙上钟，写出 -1.7e12）
+  ---
+  duration_ms: 146.3589
+  ...
+# Subtest: 上游"回了头就不发体"：停摆超时换线路，而不是把客户吊死
+ok 140 - 上游"回了头就不发体"：停摆超时换线路，而不是把客户吊死
+  ---
+  duration_ms: 516.5581
+  ...
+# Subtest: /v1/models 按 key 白名单过滤：客户不该看到自己调不了的模型
+ok 141 - /v1/models 按 key 白名单过滤：客户不该看到自己调不了的模型
+  ---
+  duration_ms: 3.3949
+  ...
+# Subtest: 熔断导致的"暂时没有可用上游"：type 不说谎，且给出标准 Retry-After
+ok 142 - 熔断导致的"暂时没有可用上游"：type 不说谎，且给出标准 Retry-After
+  ---
+  duration_ms: 8.5047
+  ...
+# Subtest: 客户端断开不得计入上游失败、不得触发熔断，且归因不能谎报是中转站错误
+ok 143 - 客户端断开不得计入上游失败、不得触发熔断，且归因不能谎报是中转站错误
+  ---
+  duration_ms: 269.5907
+  ...
+# Subtest: 同模型双供应商：主用失败当次就切兜底，熔断后走兜底，主用恢复后自动切回
+ok 144 - 同模型双供应商：主用失败当次就切兜底，熔断后走兜底，主用恢复后自动切回
+  ---
+  duration_ms: 1354.1055
+  ...
+# Subtest: 中文档位名：响应头里的模型名要百分号编码，不能把请求打成 500
+ok 145 - 中文档位名：响应头里的模型名要百分号编码，不能把请求打成 500
+  ---
+  duration_ms: 8.0517
+  ...
+# Subtest: headerSafe：非 ASCII 百分号编码，CR/LF 一并编码（顺带防头注入）
+ok 146 - headerSafe：非 ASCII 百分号编码，CR/LF 一并编码（顺带防头注入）
+  ---
+  duration_ms: 0.4029
+  ...
+# Subtest: 流式回归：上游「回了头却零字节就断」必须判失败并切备用线路（不能被吞成空 200）
+ok 147 - 流式回归：上游「回了头却零字节就断」必须判失败并切备用线路（不能被吞成空 200）
+  ---
+  duration_ms: 360.5169
+  ...
+# Subtest: 兜底估算：按字节估 token，不能把 586000 字节估成 2
+ok 148 - 兜底估算：按字节估 token，不能把 586000 字节估成 2
+  ---
+  duration_ms: 0.6019
+  ...
+# Subtest: 客户端中途放弃不能算上游失败（否则 5 次放弃就能熔断一条健康线路）
+ok 149 - 客户端中途放弃不能算上游失败（否则 5 次放弃就能熔断一条健康线路）
+  ---
+  duration_ms: 112.9935
+  ...
+# Subtest: TTFB 超时归因必须是 upstream_timeout，不能错记成 network_error（审计 D-P2-8）
+ok 150 - TTFB 超时归因必须是 upstream_timeout，不能错记成 network_error（审计 D-P2-8）
+  ---
+  duration_ms: 1016.194
+  ...
+# Subtest: 200 + finish_reason=content_filter：只加 x-relay-warning 头，响应体不动
+ok 151 - 200 + finish_reason=content_filter：只加 x-relay-warning 头，响应体不动
+  ---
+  duration_ms: 8.1873
+  ...
+# Subtest: hedge: 主线路慢 → 备线路先成功、请求提前完成、两条都被调用
+ok 152 - hedge: 主线路慢 → 备线路先成功、请求提前完成、两条都被调用
+  ---
+  duration_ms: 16139.1709
+  ...
+# Subtest: hedge: 主线路快 → 不发起备线路（不冗余调用）
+ok 153 - hedge: 主线路快 → 不发起备线路（不冗余调用）
+  ---
+  duration_ms: 5071.612
+  ...
+# Subtest: hedge: 主线路宽限内快速失败 → 仍走旧的重试/换线（不是对冲）
+ok 154 - hedge: 主线路宽限内快速失败 → 仍走旧的重试/换线（不是对冲）
+  ---
+  duration_ms: 1326.4002
+  ...
+# Subtest: hedge: 主线路后赢时，归属头指向真正服务的主线路（不是输家）
+ok 155 - hedge: 主线路后赢时，归属头指向真正服务的主线路（不是输家）
+  ---
+  duration_ms: 5481.968
+  ...
+# Subtest: hedge: 主线路宽限后真实失败 → 对冲接住，且主线路失败被记账
+ok 156 - hedge: 主线路宽限后真实失败 → 对冲接住，且主线路失败被记账
+  ---
+  duration_ms: 1446.1659
+  ...
+# Subtest: kb: 英文词切词与双字中文 bigram
+ok 157 - kb: 英文词切词与双字中文 bigram
+  ---
+  duration_ms: 1.8577
+  ...
+# Subtest: kb: 分块在长度边界重叠
+ok 158 - kb: 分块在长度边界重叠
+  ---
+  duration_ms: 0.4627
+  ...
+# Subtest: kb: 创建 → 加文档 → 检索命中相关块
+ok 159 - kb: 创建 → 加文档 → 检索命中相关块
+  ---
+  duration_ms: 453.4218
+  ...
+# Subtest: kb: 删除 KB 级联清文档与块
+ok 160 - kb: 删除 KB 级联清文档与块
+  ---
+  duration_ms: 131.3018
+  ...
+# Subtest: kb: 对未知 KB 检索返回空
+ok 161 - kb: 对未知 KB 检索返回空
+  ---
+  duration_ms: 54.901
+  ...
+# Subtest: kb: queryTerms 过滤停用词
+ok 162 - kb: queryTerms 过滤停用词
+  ---
+  duration_ms: 0.4799
+  ...
+# Subtest: kb: allowedKeys 存储与读取
+ok 163 - kb: allowedKeys 存储与读取
+  ---
+  duration_ms: 111.9388
+  ...
+# Subtest: kb: 删除 KB 后文档与分块全部清空（先子后父）
+ok 164 - kb: 删除 KB 后文档与分块全部清空（先子后父）
+  ---
+  duration_ms: 100.9491
+  ...
+# Subtest: redact：秘密字段必须掩码
+ok 165 - redact：秘密字段必须掩码
+  ---
+  duration_ms: 2.8001
+  ...
+# Subtest: redact：标识符字段绝不能被误伤（否则管理日志失去关联能力）
+ok 166 - redact：标识符字段绝不能被误伤（否则管理日志失去关联能力）
+  ---
+  duration_ms: 0.935
+  ...
+# Subtest: redact：必须递归（旧版只扫一层，嵌套秘密原样穿透）
+ok 167 - redact：必须递归（旧版只扫一层，嵌套秘密原样穿透）
+  ---
+  duration_ms: 0.2727
+  ...
+# Subtest: redact：非字符串值原样通过，不因判据误改
+ok 168 - redact：非字符串值原样通过，不因判据误改
+  ---
+  duration_ms: 0.2301
+  ...
+# Subtest: Logger.write 必须脱敏：秘密不进日志，keyId 要进
+ok 169 - Logger.write 必须脱敏：秘密不进日志，keyId 要进
+  ---
+  duration_ms: 1.3757
+  ...
+# Subtest: Logger：低于级别的日志仍不输出（脱敏不得改变级别语义）
+ok 170 - Logger：低于级别的日志仍不输出（脱敏不得改变级别语义）
+  ---
+  duration_ms: 0.2473
+  ...
+# Subtest: timeSafeEqual：相等返回 true
+ok 171 - timeSafeEqual：相等返回 true
+  ---
+  duration_ms: 0.3837
+  ...
+# Subtest: timeSafeEqual：不等/长度不同/前缀都返回 false
+ok 172 - timeSafeEqual：不等/长度不同/前缀都返回 false
+  ---
+  duration_ms: 0.3229
+  ...
+# Subtest: timeSafeEqual：多字节字符按字节比较（不按 UTF-16 码元）
+ok 173 - timeSafeEqual：多字节字符按字节比较（不按 UTF-16 码元）
+  ---
+  duration_ms: 0.72
+  ...
+# Subtest: normalizeUsage 兼容多上游字段（含 DeepSeek 的 prompt_cache_hit_tokens）
+ok 174 - normalizeUsage 兼容多上游字段（含 DeepSeek 的 prompt_cache_hit_tokens）
+  ---
+  duration_ms: 2.2924
+  ...
+# Subtest: computeCost 对缓存命中输入按缓存价计费
+ok 175 - computeCost 对缓存命中输入按缓存价计费
+  ---
+  duration_ms: 0.3774
+  ...
+# Subtest: transcriptFromSse 重建内容字符数、tool_calls 分片与 usage
+ok 176 - transcriptFromSse 重建内容字符数、tool_calls 分片与 usage
+  ---
+  duration_ms: 1.122
+  ...
+# Subtest: transcriptFromSse 识别流中途的错误帧（HTTP 200 + data:{"error":...}）
+ok 177 - transcriptFromSse 识别流中途的错误帧（HTTP 200 + data:{"error":...}）
+  ---
+  duration_ms: 0.4808
+  ...
+# Subtest: transcriptFromSse 统计畸形帧而不是静默吞掉
+ok 178 - transcriptFromSse 统计畸形帧而不是静默吞掉
+  ---
+  duration_ms: 0.3938
+  ...
+# Subtest: Meter.summarize 的降损收益口径可计算且自洽
+ok 179 - Meter.summarize 的降损收益口径可计算且自洽
+  ---
+  duration_ms: 2.1954
+  ...
+# Subtest: Meter 的归因投递率为 0 时暴露「错误不可执行」的运营问题
+ok 180 - Meter 的归因投递率为 0 时暴露「错误不可执行」的运营问题
+  ---
+  duration_ms: 0.4125
+  ...
+# Subtest: renderSummary 输出包含所有可行动口径
+ok 181 - renderSummary 输出包含所有可行动口径
+  ---
+  duration_ms: 0.7811
+  ...
+# Subtest: Meter 在 store 抛异常时 fail-open（度量挂了不影响转发）
+ok 182 - Meter 在 store 抛异常时 fail-open（度量挂了不影响转发）
+  ---
+  duration_ms: 1.2956
+  ...
+# Subtest: TraceBuilder 记录步骤、首次失败阶段与总耗时
+ok 183 - TraceBuilder 记录步骤、首次失败阶段与总耗时
+  ---
+  duration_ms: 0.9516
+  ...
+# Subtest: TraceBuilder 遵守 maxSteps 上限（轨迹本身不能变成新的原始载荷）
+ok 184 - TraceBuilder 遵守 maxSteps 上限（轨迹本身不能变成新的原始载荷）
+  ---
+  duration_ms: 0.467
+  ...
+# Subtest: TraceBuilder 在 disabled 时不记录任何步骤
+ok 185 - TraceBuilder 在 disabled 时不记录任何步骤
+  ---
+  duration_ms: 0.2065
+  ...
+# Subtest: renderTrace 输出可读时间线
+ok 186 - renderTrace 输出可读时间线
+  ---
+  duration_ms: 0.3528
+  ...
+# Subtest: diffTraces 定位两次请求的分歧点（复盘两次失败）
+ok 187 - diffTraces 定位两次请求的分歧点（复盘两次失败）
+  ---
+  duration_ms: 1.3745
+  ...
+# Subtest: TraceStore 环形缓冲保留最近 N 条且可持久化
+ok 188 - TraceStore 环形缓冲保留最近 N 条且可持久化
+  ---
+  duration_ms: 0.9024
+  ...
+# Subtest: RingBuffer 未满时不会把空槽当成数据返回（number 场景）
+ok 189 - RingBuffer 未满时不会把空槽当成数据返回（number 场景）
+  ---
+  duration_ms: 0.218
+  ...
+# Subtest: 指纹：带 tool_calls 历史的 Agent 请求得分显著高于普通聊天
+ok 190 - 指纹：带 tool_calls 历史的 Agent 请求得分显著高于普通聊天
+  ---
+  duration_ms: 2.8653
+  ...
+# Subtest: 指纹只输出 system prompt 的 HMAC 前缀，不泄漏正文
+ok 191 - 指纹只输出 system prompt 的 HMAC 前缀，不泄漏正文
+  ---
+  duration_ms: 1.1515
+  ...
+# Subtest: 指纹规则版本号存在（指标口径可演进）
+ok 192 - 指纹规则版本号存在（指标口径可演进）
+  ---
+  duration_ms: 0.3186
+  ...
+# Subtest: BoundedCache 有界、LRU、统计命中率
+ok 193 - BoundedCache 有界、LRU、统计命中率
+  ---
+  duration_ms: 0.3885
+  ...
+# Subtest: RingBuffer 由新到旧返回且容量固定
+ok 194 - RingBuffer 由新到旧返回且容量固定
+  ---
+  duration_ms: 0.1597
+  ...
+# Subtest: SlidingWindowCounter 正确淘汰过期桶
+ok 195 - SlidingWindowCounter 正确淘汰过期桶
+  ---
+  duration_ms: 0.2062
+  ...
+# Subtest: estimateTokens 对中英文给出量级正确的估算
+ok 196 - estimateTokens 对中英文给出量级正确的估算
+  ---
+  duration_ms: 0.3937
+  ...
+# Subtest: backoffDelay 有上界且随重试次数增长
+ok 197 - backoffDelay 有上界且随重试次数增长
+  ---
+  duration_ms: 0.168
+  ...
+# Subtest: percentile 处理空数组与边界
+ok 198 - percentile 处理空数组与边界
+  ---
+  duration_ms: 0.102
+  ...
+# Subtest: 零 token 守卫：成功请求却零 token 会写 meter.zero_token 事件（静默少记必须可见）
+ok 199 - 零 token 守卫：成功请求却零 token 会写 meter.zero_token 事件（静默少记必须可见）
+  ---
+  duration_ms: 0.4746
+  ...
+# Subtest: 零 token 守卫：正常记到 token 时不误报；没产出内容时也不报
+ok 200 - 零 token 守卫：正常记到 token 时不误报；没产出内容时也不报
+  ---
+  duration_ms: 0.2525
+  ...
+# Subtest: h2Fetch：能用 HTTP/2 发请求、收到响应头与流式响应体
+ok 201 - h2Fetch：能用 HTTP/2 发请求、收到响应头与流式响应体
+  ---
+  duration_ms: 61.7532
+  ...
+# Subtest: h2Fetch：上游返回非 2xx 时状态码与头照样透出来（错误路径不能吞）
+ok 202 - h2Fetch：上游返回非 2xx 时状态码与头照样透出来（错误路径不能吞）
+  ---
+  duration_ms: 7.5919
+  ...
+# Subtest: h2Fetch + connectIp：按给定 IP 建连（域名根本解析不了也能通）
+ok 203 - h2Fetch + connectIp：按给定 IP 建连（域名根本解析不了也能通）
+  ---
+  duration_ms: 6.9838
+  ...
+# Subtest: h2 不可用标记：必须带 TTL，且键要含端口（否则非 443 永远打不中）
+ok 204 - h2 不可用标记：必须带 TTL，且键要含端口（否则非 443 永远打不中）
+  ---
+  duration_ms: 0.4479
+  ...
+# Subtest: h2 会话池：并发冷启动只建一条会话（不能 10 并发建 10 条）
+ok 205 - h2 会话池：并发冷启动只建一条会话（不能 10 并发建 10 条）
+  ---
+  duration_ms: 12.4638
+  ...
+# Subtest: 可信 DNS：解析器抖动时用上次的好 IP（stale-if-error），不许掉回系统解析器
+ok 206 - 可信 DNS：解析器抖动时用上次的好 IP（stale-if-error），不许掉回系统解析器
+  ---
+  duration_ms: 5.6047
+  ...
+# Subtest: usage 变体：Anthropic 风格与"只有 total_tokens"都必须能计价（不能成本恒 0）
+ok 207 - usage 变体：Anthropic 风格与"只有 total_tokens"都必须能计价（不能成本恒 0）
+  ---
+  duration_ms: 0.2547
+  ...
+# Subtest: 真·模型没人声明 → model_unsupported（只有这一种才该换模型名）
+ok 208 - 真·模型没人声明 → model_unsupported（只有这一种才该换模型名）
+  ---
+  duration_ms: 3.79
+  ...
+# Subtest: 全在熔断 → all_breaker_open，并且能读出根本失败原因
+ok 209 - 全在熔断 → all_breaker_open，并且能读出根本失败原因
+  ---
+  duration_ms: 1.5456
+  ...
+# Subtest: 被人工摘除 → all_disabled（运营动作，不是上游故障）
+ok 210 - 被人工摘除 → all_disabled（运营动作，不是上游故障）
+  ---
+  duration_ms: 0.9632
+  ...
+# Subtest: 声明了但本请求内被排除 → all_excluded，绝不许说成模型不存在
+ok 211 - 声明了但本请求内被排除 → all_excluded，绝不许说成模型不存在
+  ---
+  duration_ms: 0.7726
+  ...
+# Subtest: 禁用 + 熔断同时存在 → mixed，两种原因都不丢
+ok 212 - 禁用 + 熔断同时存在 → mixed，两种原因都不丢
+  ---
+  duration_ms: 1.0238
+  ...
+# Subtest: 合法请求零违规
+ok 213 - 合法请求零违规
+  ---
+  duration_ms: 4.2434
+  ...
+# Subtest: 未知模型被拦截并给出最接近的候选
+ok 214 - 未知模型被拦截并给出最接近的候选
+  ---
+  duration_ms: 1.0499
+  ...
+# Subtest: 缺少 model / messages 被拦截
+ok 215 - 缺少 model / messages 被拦截
+  ---
+  duration_ms: 0.402
+  ...
+# Subtest: tool_call 的 arguments 必须是 JSON 字符串而非对象（最常见的 Agent 框架 bug）
+ok 216 - tool_call 的 arguments 必须是 JSON 字符串而非对象（最常见的 Agent 框架 bug）
+  ---
+  duration_ms: 0.6007
+  ...
+# Subtest: tool_call 的 arguments 是截断的 JSON 也能被识别
+ok 217 - tool_call 的 arguments 是截断的 JSON 也能被识别
+  ---
+  duration_ms: 0.8909
+  ...
+# Subtest: tool 结果回引不存在的 tool_call_id 被拦截
+ok 218 - tool 结果回引不存在的 tool_call_id 被拦截
+  ---
+  duration_ms: 0.4193
+  ...
+# Subtest: 匹配的 tool_call_id 不报错
+ok 219 - 匹配的 tool_call_id 不报错
+  ---
+  duration_ms: 0.2422
+  ...
+# Subtest: 采样参数越界被拦截（用一套边界拦所有上游会误拦 —— 这里只拦协议级硬边界）
+ok 220 - 采样参数越界被拦截（用一套边界拦所有上游会误拦 —— 这里只拦协议级硬边界）
+  ---
+  duration_ms: 0.3055
+  ...
+# Subtest: max_tokens 上限：模型声明过的优先，没声明走配置的绝对天花板
+ok 221 - max_tokens 上限：模型声明过的优先，没声明走配置的绝对天花板
+  ---
+  duration_ms: 0.7102
+  ...
+# Subtest: max_tokens 天花板可关（ceiling=0 退回不设防，保持可逆）
+ok 222 - max_tokens 天花板可关（ceiling=0 退回不设防，保持可逆）
+  ---
+  duration_ms: 0.4997
+  ...
+# Subtest: 模型名走原型链键：不得把 Object 当成它的输出上限
+ok 223 - 模型名走原型链键：不得把 Object 当成它的输出上限
+  ---
+  duration_ms: 0.5254
+  ...
+# Subtest: json_object 模式但消息里没有 JSON 指令 → 仅告警不拦截
+ok 224 - json_object 模式但消息里没有 JSON 指令 → 仅告警不拦截
+  ---
+  duration_ms: 0.3619
+  ...
+# Subtest: 危险命令只对 shell 类工具生效，且只报 block 不误伤普通工具
+ok 225 - 危险命令只对 shell 类工具生效，且只报 block 不误伤普通工具
+  ---
+  duration_ms: 0.5089
+  ...
+# Subtest: 重复工具名被拦截（模型无法区分同名工具）
+ok 226 - 重复工具名被拦截（模型无法区分同名工具）
+  ---
+  duration_ms: 0.3011
+  ...
+# Subtest: tool_choice 指向未声明的工具被拦截
+ok 227 - tool_choice 指向未声明的工具被拦截
+  ---
+  duration_ms: 1.5616
+  ...
+# Subtest: 预检预算耗尽时 fail-open 放行（degraded=上限保护）
+ok 228 - 预检预算耗尽时 fail-open 放行（degraded=上限保护）
+  ---
+  duration_ms: 0.5139
+  ...
+# Subtest: 预算为 0 表示不限制（不会误判为超预算）
+ok 229 - 预算为 0 表示不限制（不会误判为超预算）
+  ---
+  duration_ms: 0.6234
+  ...
+# Subtest: 预检是纯函数：同一输入两次调用结果一致
+ok 230 - 预检是纯函数：同一输入两次调用结果一致
+  ---
+  duration_ms: 1.0347
+  ...
+# Subtest: 违规码到归因语义的映射覆盖关键类别
+ok 231 - 违规码到归因语义的映射覆盖关键类别
+  ---
+  duration_ms: 0.1727
+  ...
+# Subtest: 模型名建议使用编辑距离且不返回无关模型
+ok 232 - 模型名建议使用编辑距离且不返回无关模型
+  ---
+  duration_ms: 0.2668
+  ...
+# Subtest: 预算被打穿时，危险命令仍然必须被拦截（安全级不受时间预算影响）
+ok 233 - 预算被打穿时，危险命令仍然必须被拦截（安全级不受时间预算影响）
+  ---
+  duration_ms: 0.507
+  ...
+# Subtest: 预算被打穿时，提示级检查确实被跳过（证明预算仍然生效，不是被删掉了）
+ok 234 - 预算被打穿时，提示级检查确实被跳过（证明预算仍然生效，不是被删掉了）
+  ---
+  duration_ms: 0.2786
+  ...
+# Subtest: ownLookup：自有键正常取值
+ok 235 - ownLookup：自有键正常取值
+  ---
+  duration_ms: 2.1471
+  ...
+# Subtest: ownLookup：原型链键一律返回 undefined（而不是函数/对象）
+ok 236 - ownLookup：原型链键一律返回 undefined（而不是函数/对象）
+  ---
+  duration_ms: 0.2329
+  ...
+# Subtest: ownLookup：不存在的键与 undefined 容器
+ok 237 - ownLookup：不存在的键与 undefined 容器
+  ---
+  duration_ms: 0.1779
+  ...
+# Subtest: ownLookup：自有属性名叫 constructor 也能取到（只排继承，不排同名自有键）
+ok 238 - ownLookup：自有属性名叫 constructor 也能取到（只排继承，不排同名自有键）
+  ---
+  duration_ms: 0.1725
+  ...
+# Subtest: ownLookup：值为 undefined/falsy 的自有键必须原样返回（不能与"取不到"混淆）
+ok 239 - ownLookup：值为 undefined/falsy 的自有键必须原样返回（不能与"取不到"混淆）
+  ---
+  duration_ms: 0.3915
+  ...
+# Subtest: 窗口不变量：windowMs 恒为有限正数，标签必须是合规形状
+ok 240 - 窗口不变量：windowMs 恒为有限正数，标签必须是合规形状
+  ---
+  duration_ms: 2.0588
+  ...
+# Subtest: 窗口不变量：原型链键与普通未识别键待遇一致（都按 24h 兜底 + 提示未识别）
+ok 241 - 窗口不变量：原型链键与普通未识别键待遇一致（都按 24h 兜底 + 提示未识别）
+  ---
+  duration_ms: 0.4198
+  ...
+# Subtest: windowOf 与 windowFrom/windowLabel 逐字一致（同源）
+ok 242 - windowOf 与 windowFrom/windowLabel 逐字一致（同源）
+  ---
+  duration_ms: 0.6905
+  ...
+# Subtest: 窗口白名单与边界值行为不变（防修复顺手改坏正常路径）
+ok 243 - 窗口白名单与边界值行为不变（防修复顺手改坏正常路径）
+  ---
+  duration_ms: 0.6295
+  ...
+# Subtest: 模型名走原型链键：必须是 4xx + 报文干净，而不是 500 或泄漏 JS 内部结构
+ok 244 - 模型名走原型链键：必须是 4xx + 报文干净，而不是 500 或泄漏 JS 内部结构
+  ---
+  duration_ms: 24.9905
+  ...
+# Subtest: 模型名走原型链键：与普通未知模型名待遇完全一致
+ok 245 - 模型名走原型链键：与普通未知模型名待遇完全一致
+  ---
+  duration_ms: 9.3443
+  ...
+# Subtest: 真实模型名与别名不受影响（防止修复顺手改坏正常路径）
+ok 246 - 真实模型名与别名不受影响（防止修复顺手改坏正常路径）
+  ---
+  duration_ms: 62.7054
+  ...
+# Subtest: 点名模型被限流：横向换供应商耗尽后，沿阶梯竖向换模型而不是丢 429 回客户端
+ok 247 - 点名模型被限流：横向换供应商耗尽后，沿阶梯竖向换模型而不是丢 429 回客户端
+  ---
+  duration_ms: 95.3956
+  ...
+# Subtest: 客户点名的模型永远是第一阶：健康时绝不擅自替换成同档其他模型
+ok 248 - 客户点名的模型永远是第一阶：健康时绝不擅自替换成同档其他模型
+  ---
+  duration_ms: 15.9753
+  ...
+# Subtest: 开关关闭：退回单阶阶梯，429 原样丢回客户端（证明修复可逆）
+ok 249 - 开关关闭：退回单阶阶梯，429 原样丢回客户端（证明修复可逆）
+  ---
+  duration_ms: 24.4637
+  ...
+# Subtest: 只追加排在其后的同档模型：flash 不会被换成排序更靠前的 pro
+ok 250 - 只追加排在其后的同档模型：flash 不会被换成排序更靠前的 pro
+  ---
+  duration_ms: 35.3774
+  ...
+# Subtest: 未被任何阶梯声明的模型不擅自替换（运营没标等价关系就不猜）
+ok 251 - 未被任何阶梯声明的模型不擅自替换（运营没标等价关系就不猜）
+  ---
+  duration_ms: 28.5596
+  ...
+# Subtest: 阶梯名请求的行为不变（修复只影响点名具体模型的场景）
+ok 252 - 阶梯名请求的行为不变（修复只影响点名具体模型的场景）
+  ---
+  duration_ms: 22.0816
+  ...
+# Subtest: 同厂姊妹优先：跨厂商兜底只排在同厂全限流之后
+ok 253 - 同厂姊妹优先：跨厂商兜底只排在同厂全限流之后
+  ---
+  duration_ms: 72.4866
+  ...
+# Subtest: starter: 每个内置模板都能生成可解析的配置
+ok 254 - starter: 每个内置模板都能生成可解析的配置
+  ---
+  duration_ms: 11.7679
+  ...
+# Subtest: starter: 真实厂商的密钥必须是环境变量占位符，绝不能是明文
+ok 255 - starter: 真实厂商的密钥必须是环境变量占位符，绝不能是明文
+  ---
+  duration_ms: 2.0373
+  ...
+# Subtest: starter: mock 模板零配置可跑（不需要任何环境变量）
+ok 256 - starter: mock 模板零配置可跑（不需要任何环境变量）
+  ---
+  duration_ms: 2.2166
+  ...
+# Subtest: starter: 默认三层的降损开关符合定位（免费层纯管道）
+ok 257 - starter: 默认三层的降损开关符合定位（免费层纯管道）
+  ---
+  duration_ms: 0.527
+  ...
+# Subtest: starter: 可以覆盖模型列表
+ok 258 - starter: 可以覆盖模型列表
+  ---
+  duration_ms: 0.76
+  ...
+# Subtest: starter: 可以指定第二个 key 做轮换
+ok 259 - starter: 可以指定第二个 key 做轮换
+  ---
+  duration_ms: 0.644
+  ...
+# Subtest: starter: 自定义环境变量名生效
+ok 260 - starter: 自定义环境变量名生效
+  ---
+  duration_ms: 0.427
+  ...
+# Subtest: starter: 端口与 key 前缀可覆盖
+ok 261 - starter: 端口与 key 前缀可覆盖
+  ---
+  duration_ms: 1.4377
+  ...
+# Subtest: starter: 生成的配置里不该出现"三个上游"这类起步期噪音
+ok 262 - starter: 生成的配置里不该出现"三个上游"这类起步期噪音
+  ---
+  duration_ms: 0.5922
+  ...
+# Subtest: starter: 可以关掉降损层配置块（给只想纯转发的场景）
+ok 263 - starter: 可以关掉降损层配置块（给只想纯转发的场景）
+  ---
+  duration_ms: 0.5917
+  ...
+# Subtest: starter: 未知厂商返回 undefined（CLI 会给出可用列表）
+ok 264 - starter: 未知厂商返回 undefined（CLI 会给出可用列表）
+  ---
+  duration_ms: 0.2447
+  ...
+# Subtest: starter: Agnes 模板用 bearerless 鉴权与真实模型名
+ok 265 - starter: Agnes 模板用 bearerless 鉴权与真实模型名
+  ---
+  duration_ms: 0.4141
+  ...
+# Subtest: buildAuthHeader: 四种格式产生的头正确（含 Agnes 的 bearerless）
+ok 266 - buildAuthHeader: 四种格式产生的头正确（含 Agnes 的 bearerless）
+  ---
+  duration_ms: 0.2663
+  ...
+# Subtest: pull-models 判据：MiMo 的 6 个模型里只能自动收下 2 个对话模型
+ok 267 - pull-models 判据：MiMo 的 6 个模型里只能自动收下 2 个对话模型
+  ---
+  duration_ms: 95.2913
+  ...
+# Subtest: pull-models 判据：音频/视频/图像/重排/审核一律排除
+ok 268 - pull-models 判据：音频/视频/图像/重排/审核一律排除
+  ---
+  duration_ms: 0.4861
+  ...
+# Subtest: pull-models 判据：向量模型必须保留 —— 本网关实现了 /v1/embeddings
+ok 269 - pull-models 判据：向量模型必须保留 —— 本网关实现了 /v1/embeddings
+  ---
+  duration_ms: 0.2732
+  ...
+1..269
+# tests 269
+# suites 0
+# pass 269
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 108294.9389

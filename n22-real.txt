@@ -1,0 +1,10 @@
+
+> api-relay@0.1.0 test
+> tsc -p tsconfig.json && node --experimental-sqlite --disable-warning=ExperimentalWarning --test "dist/test/*.test.js"
+
+src/test/agent.test.ts(16,34): error TS1005: '{' expected.
+src/test/agent.test.ts(16,154): error TS1005: ',' expected.
+src/test/agent.test.ts(140,1): error TS1005: '}' expected.
+src/test/kb.test.ts(16,34): error TS1005: '{' expected.
+src/test/kb.test.ts(16,154): error TS1005: ',' expected.
+src/test/kb.test.ts(119,1): error TS1005: '}' expected.

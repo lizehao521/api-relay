@@ -208,7 +208,12 @@ export class KbStore {
     const r = this.db?.prepare('SELECT * FROM kb WHERE id=?').get(id) as
       | Record<string, unknown>
       | undefined;
-    return r ? this.toKb(r) : undefined;
+    if (!r) return undefined;
+    // 归一化：node:sqlite 在部分版本（如 Node 22.5.0）对"无结果"返回 {列:null} 占位对象，
+    // 而非 undefined；把所有字段都是 null 的占位视为"未找到"，避免 getKb 返回假记录。
+    const vals = Object.values(r);
+    if (vals.length > 0 && vals.every((v) => v === null)) return undefined;
+    return this.toKb(r);
   }
 
   listKbs(): KbRecord[] {

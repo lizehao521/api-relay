@@ -4,7 +4,7 @@
  */
 
 import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { rmTmp } from './testcleanup.js';import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +13,7 @@ import { KbStore, chunkText, tokenize, queryTerms } from '../kb/store.js';
 function tempKb(t: string): { store: KbStore; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), t));
   const store = new KbStore({ path: join(dir, 'kb.db'), chunkSize: 128, chunkOverlap: 16 });
-  return { store, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { store, cleanup: async () => { await rmTmp(dir); } };
 }
 
 async function boot(t: string): Promise<{ store: KbStore; cleanup: () => void }> {

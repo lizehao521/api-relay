@@ -7,7 +7,7 @@
  */
 
 import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { rmTmp } from './testcleanup.js';import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -100,7 +100,7 @@ lossReduction:
     close: async () => {
       await app.shutdown();
       await mock.close();
-      rmSync(dir, { recursive: true, force: true });
+      await rmTmp(dir);
     },
   };
 }
@@ -675,7 +675,7 @@ lossReduction:
     }
   } finally {
     await mock.close();
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 
@@ -831,7 +831,7 @@ lossReduction:
     }
   } finally {
     await mock.close();
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 
@@ -945,7 +945,7 @@ lossReduction:
     }
   } finally {
     await mock.close();
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 
@@ -1057,7 +1057,7 @@ lossReduction:
     }
   } finally {
     await mock.close();
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 
@@ -1112,7 +1112,7 @@ lossReduction:
     }
   } finally {
     await mock.close();
-    rmSync(dir, { recursive: true, force: true });
+    await rmTmp(dir);
   }
 });
 

@@ -198,6 +198,28 @@ export class AgentOps {
 
   listRuns(limit = 50): StoredRun[] { return this.db.listRuns(limit); }
   listSessions(limit = 50): StoredSession[] { return this.db.listSessions(limit); }
+
+  /**
+   * GET /admin/api/agent：状态视图（总览页「平台能力」区消费；旧 agentView 的取代面）。
+   * 形状保持 {enabled, status.*} 兼容旧面板消费口径：model/enabled 在 status 里。
+   */
+  statusView(): Record<string, unknown> {
+    const cfg = this.deps.agentConfig;
+    return {
+      enabled: true,
+      status: {
+        enabled: true,
+        model: cfg.model ?? 'default',
+        clientId: cfg.clientId ?? '',
+        kbId: cfg.kbId ?? '',
+        httpTools: this.db.listTools().filter((t) => t.enabled).length,
+        pendingApprovals: this.approvals.list('pending').length,
+        sessions: this.db.listSessions(1000).length,
+        baseUrl: this.baseUrl,
+        running: false,
+      },
+    };
+  }
   getSession(id: string): StoredSession | undefined { return this.db.getSession(id); }
 
   /** GET /admin/api/agent/tools：内置 + 外部 HTTP */

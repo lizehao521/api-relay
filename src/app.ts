@@ -18,9 +18,6 @@ import { Engine } from './gateway/engine.js';
 import { RelayServer } from './gateway/server.js';
 import { AdminApi } from './admin/api.js';
 import { KbStore } from './kb/store.js';
-import { AgentRunner } from './agent/runner.js';
-import { createAgentLlm } from './agent/llm.js';
-import { createAgentContext } from './agent/context.js';
 import { AgentOps } from './agent/ops.js';
 
 export interface App {
@@ -29,8 +26,6 @@ export interface App {
   store: Store;
   /** 知识库存储（垂直 Agent 能力；未启用时 undefined） */
   kb?: KbStore | undefined;
-  /** 内部 Agent 系统（自托管运维/迭代决策环；未启用时 undefined） */
-  agent?: AgentRunner | undefined;
   /** 运营 Agent（平台规则 Agent；未启用时 undefined） */
   agentOps?: AgentOps | undefined;
   pool: ProviderPool;
@@ -136,35 +131,6 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
     agentOps,
     serverStats: () => server.stats,
   });
-  /* ---------- 内部 Agent 系统（自托管运维/迭代决策环；未启用则不建） ---------- */
-  let agent: AgentRunner | undefined;
-  if (config.agent?.enabled) {
-    const agentKeyRec = config.clients.find((c) => c.id === config.agent!.clientId);
-    const agentKey = agentKeyRec?.key ?? '';
-    // Agent 调 LLM 走本网关（自证闭环）；baseUrl 在 start() 里回填（listen 之后才知道确切 host）
-    const llm = createAgentLlm({ baseUrl: 'http://127.0.0.1', key: agentKey, model: config.agent.model ?? 'default' });
-    // baseUrl 需要真实端口，先用占位，start() 时替换
-    const context = createAgentContext({
-      pool, store, meter, kb,
-      recentEvents: config.agent.recentEvents,
-    });
-    agent = new AgentRunner({
-      config: config.agent,
-      logger,
-      llm,
-      context,
-      kb,
-      store,
-      kbId: config.agent.kbId ?? 'kb_demo',
-    });
-  }
-
-  // 回填 agent 到 admin.deps（AdminDeps.agent 可选字段；agent 构建在 admin 之后）
-  if (agent) {
-    const adminRef = admin as unknown as { deps: { agent?: AgentRunner } };
-    adminRef.deps.agent = agent;
-  }
-
   const server = new RelayServer({ config, engine, admin, logger, kb, keys });
 
   return {
@@ -172,7 +138,6 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
     logger,
     store,
     kb,
-    agent,
     agentOps,
     pool,
     router,
@@ -184,11 +149,7 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
     admin,
     async start() {
       const bound = await server.listen();
-      // 回填 Agent 的 LLM base URL（listen 之后才知道确切 host:port），并启动周期巡检
-      if (agent) {
-        agent.setBaseUrl(bound.url);
-        agent.start();
-      }
+      // 回填运营 Agent 的 LLM base URL（listen 之后才知道确切 host:port），并启动审批清扫
       if (agentOps) {
         agentOps.setBaseUrl(bound.url);
         agentOps.start();
@@ -207,7 +168,6 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
       await server.close(config.server.shutdownGraceMs);
     },
     async shutdown() {
-      agent?.stop();
       agentOps?.stop();
       await server.close(config.server.shutdownGraceMs);
       await store.close();

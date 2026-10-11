@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentRuntime, type AgentPendingApproval } from '../agent/runtime.js';
 import type { AgentTool, AgentToolCall } from '../agent/types.js';
-import type { AgentLlmCall } from '../agent/runner.js';
+import type { AgentLlmCall } from '../agent/llm.js';
 import { gateEgress, isBlockedAddress, normalizeIpv4, createHttpTool } from '../agent/tools/httpTool.js';
 import { AgentDb, type StoredApproval } from '../agent/session.js';
 import { ApprovalCenter } from '../agent/approval.js';

@@ -3,7 +3,18 @@
  * 每次调用自然被网关的鉴权/预检/路由/归因/计量保护。
  */
 
-import type { AgentLlmCall } from './runner.js';
+/**
+ * LLM 调用契约（原居 runner.ts；Phase D 旧 runner 移除后迁入本文件作为唯一来源）。
+ * 实现方负责鉴权 key；Agent 运行时（runtime.ts）与组合层（ops.ts）共同依赖本接口。
+ */
+export interface AgentLlmCall {
+  /** 调 LLM：走网关自身 /v1/chat/completions */
+  chat(messages: { role: string; content: string }[], opts: { model: string; timeoutMs: number }): Promise<{
+    content: string;
+    promptTokens: number;
+    completionTokens: number;
+  }>;
+}
 
 export interface AgentLlmOptions {
   /** 网关自身 base URL（http://127.0.0.1:8787） */

@@ -14,7 +14,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { secHeaders, json, text, badRequest, notFoundOrBad } from './response.js';
 import { AdminAuth } from './auth.js';
 import { KbHandlers } from './handlers/kb.js';
-import { AgentHandlers } from './handlers/agent.js';
 import { KeyHandlers } from './handlers/keys.js';
 import { EvolutionHandlers } from './handlers/evolution.js';
 import { ProviderHandlers } from './handlers/providers.js';
@@ -37,7 +36,6 @@ import type { RelayConfig, TraceRecord } from '../core/types.js';
 import { dashboardHtml } from './dashboard.js';
 import { gzipSync } from 'node:zlib';
 import { KbStore } from '../kb/store.js';
-import type { AgentRunner } from '../agent/runner.js';
 import { AgentOpsHandlers } from './handlers/agentOps.js';
 import type { AgentOps } from '../agent/ops.js';
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
@@ -55,8 +53,6 @@ export interface AdminDeps {
   traceStore: TraceStore;
   /** 知识库存储（垂直 Agent 能力；undefined = 未启用） */
   kb?: KbStore | undefined;
-  /** 内部 Agent 系统（自托管运维/迭代决策环；undefined = 未启用） */
-  agent?: AgentRunner | undefined;
   /** 运营 Agent（平台规则 Agent；undefined = 未启用） */
   agentOps?: AgentOps | undefined;
   serverStats: () => { requestCount: number; inflight: number; uptimeMs: number };
@@ -70,10 +66,9 @@ export class AdminApi {
     this.auth = new AdminAuth(deps.config.server.adminToken);
     this.routes = this.buildRoutes();
     this.kb = new KbHandlers({ config: deps.config, store: deps.store, kb: deps.kb });
-    // agent 用惰性 getter：app.ts 在 AdminApi 构造**之后**才创建 AgentRunner 并回填
-    // deps.agent。按值捕获会拿到构造那刻的 undefined（本层实际踩到的回归）。
-    this.agent = new AgentHandlers({ store: deps.store, logger: deps.logger, agent: () => deps.agent });
-    // 运营 Agent 子路由（chat/sessions/tools/approvals/history）；惰性取值同上约束
+    // 运营 Agent 子路由（chat/sessions/tools/approvals/history）；惰性 getter：app.ts 在
+    // AdminApi 构造**之后**才创建 AgentOps——按值捕获会拿到构造那刻的 undefined（旧
+    // AgentHandlers 同款坑）。
     this.agentOps = new AgentOpsHandlers({ ops: () => deps.agentOps, logger: deps.logger });
     // budgetWatch 传的是 Map 引用（该引用从不重新赋值，只 get/set/delete）——
     // 与 agent 那个坑不同：那里是「构造后才赋值的 undefined」，这里共享同一个可变对象。
@@ -171,8 +166,6 @@ export class AdminApi {
   private readonly routes: Route[];
   /** KB handler（P2 拆分第四层：见 handlers/kb.ts） */
   private readonly kb: KbHandlers;
-  /** Agent handler（P2 拆分第四层：见 handlers/agent.ts） */
-  private readonly agent: AgentHandlers;
   /** 运营 Agent handler（平台规则 Agent：见 handlers/agentOps.ts） */
   private readonly agentOps: AgentOpsHandlers;
   /** key 生命周期 handler（P2 拆分第四层：见 handlers/keys.ts） */
@@ -752,17 +745,18 @@ export class AdminApi {
       return this.kbRoute(req.method ?? 'GET', action, url, body, res, actor);
     }
 
-    /* ---------------- 内部 Agent /admin/api/agent/... ---------------- */
+    /* ---------------- 运营 Agent /admin/api/agent/...（Phase D 起为唯一 Agent 面） ---------------- */
     if (action === 'agent') {
-      if (req.method === 'GET') return json(res, 200, this.agentView());
-      if (req.method === 'POST') return this.agentTrigger(res, body, actor);
-      return json(res, 405, { error: { message: `agent 集合端点只支持 GET/POST，收到 ${req.method}`, type: 'method_not_allowed', code: 'method_not_allowed' } });
+      // 状态视图；旧 POST 触发端点已随内部 Agent runner 移除（Phase D）
+      if (req.method === 'GET') {
+        if (!this.deps.agentOps) return json(res, 200, { enabled: false });
+        return json(res, 200, this.deps.agentOps.statusView());
+      }
+      return json(res, 405, { error: { message: `agent 集合端点只支持 GET（状态视图；旧 POST 触发已移除，请用 POST agent/chat），收到 ${req.method}`, type: 'method_not_allowed', code: 'method_not_allowed' } });
     }
     if (action.startsWith('agent/')) {
-      // 运营 Agent 子路由优先分流（chat/sessions/tools/approvals/history）；
-      // 旧 agent handler 继续管 last/runs（Phase D 整合后移除）
       if (this.agentOps.handles(action)) return this.agentOps.dispatch(req.method ?? 'GET', action, url, body, res, actor);
-      return this.agentRoute(req.method ?? 'GET', action, url, body, res, actor);
+      return json(res, 404, { error: { message: `未知 agent 子路由：${action}`, type: 'not_found', code: 'not_found' } });
     }
 
     void requestId;
@@ -782,7 +776,11 @@ export class AdminApi {
         ? '管理接口需要 X-Admin-Token（或 Authorization: Bearer）；看板外壳与 panel-info 本身不需要令牌'
         : '未配置 adminToken：管理接口仅接受来自 127.0.0.1/::1 的请求。这是体验模式的默认行为；生产环境请务必设置 adminToken。',
       writableEndpoints: [
-        'POST /admin/api/agent （触发一次巡检·manual#135 进自动刷新白名单后 GUI 触发按钮消费）',
+        // 运营 Agent（平台规则 Agent；旧 POST agent 触发端点已随内部 runner 移除，Phase D）
+        'POST /admin/api/agent/chat （运营 Agent 对话：{message, session_id?, kb_id?, actor?} → {session_id, reply, tool_calls, approvals_pending}）',
+        'POST /admin/api/agent/tools （注册外部 HTTP 工具：{name, method, url, description?}；写方法 POST/PUT/DELETE/PATCH 调用时自动挂审批单，GET 免审）',
+        'DELETE /admin/api/agent/tools/{name} （移除 HTTP 工具）',
+        'POST /admin/api/agent/approvals/{id} （审批裁决：{action: approve|reject, actor?}；approve 后异步执行并回填会话）',
         'POST /admin/api/keys/create',
         'POST /admin/api/keys/update',
         'POST /admin/api/keys/revoke',
@@ -813,12 +811,13 @@ export class AdminApi {
         'GET /admin/api/overview|series|providers|keys|auth-failures|traces|traces/:id|config|events|report|auth-policy|loss-reduction|metrics|attribution/catalog|top-errors',
         'GET /admin/api/health （管理面健康：healthz + serverStats）',
         'GET /admin/api/kb|kb/{id}/docs|kb/{id}/docs/{docId}|kb/{id}/stats （知识库，需启用）',
-        'GET /admin/api/agent|agent/last|agent/runs （内部 Agent，需启用）',
+        'GET /admin/api/agent （运营 Agent 状态；未启用返回 {enabled:false}，200 非错误）',
+        'GET /admin/api/agent/sessions|agent/sessions/{id} （会话）| agent/tools （工具清单）| agent/approvals?status= （审批队列）| agent/history?limit= （工具执行历史）（需启用）',
         'GET /admin/api/evolution-direction （进化方向候选队列+当前手动设置·manual#372）',
       ],
       endpointNotes: {
         report: 'text/plain（渲染后的摘要文本，非 JSON——客户端按 raw 文本处理）；含分层/客户端类型/上游/模型/失败归因/建议动作/降损层收益各节（模型节 manual#229，数据源同 overview 的 dimensionStats）',
-        agentLast: '尚无运行记录时返回 404（业务语义，非路由缺失）',
+        agent: '旧端点 agent/last|agent/runs 与 POST agent 触发已随内部 Agent runner 移除（v0.2 Phase D 整合取代）；运营 Agent 的会话/审批/历史见 agent/sessions|agent/approvals|agent/history',
         tracesDiff: 'GET /admin/api/traces/:id?diff=<另一traceId> 返回 TraceDiff（diverged/onlyInA/onlyInB/durationDeltaMs/sameOutcome）——一成一败对比（manual#99）',
         // 性能三连的契约面（manual#166 补记）：三个新能力此前面临「实现了但契约没记账」——
         // API 消费者查 panelInfo 以为没有。slim 都是 opt-in 参数，默认返回不变。
@@ -914,28 +913,6 @@ export class AdminApi {
     actor?: string,
   ): boolean {
     return this.kb.route(method, action, url, body, res, actor);
-  }
-
-  /* ---------------- 内部 Agent /admin/api/agent/... ---------------- */
-  // P2 拆分第四层第二刀：Agent 视图/触发/子路由已切到 handlers/agent.ts。
-
-  private agentView(): Record<string, unknown> {
-    return this.agent.view();
-  }
-
-  private agentTrigger(res: ServerResponse, body: Record<string, unknown> | undefined, actor?: string): boolean {
-    return this.agent.trigger(res, body, actor);
-  }
-
-  private agentRoute(
-    method: string,
-    action: string,
-    url: URL,
-    body: Record<string, unknown> | undefined,
-    res: ServerResponse,
-    actor?: string,
-  ): boolean {
-    return this.agent.route(method, action, url, body, res, actor);
   }
 
   /* ---------------- key 生命周期（面板核心写操作） ---------------- */

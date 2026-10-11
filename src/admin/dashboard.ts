@@ -514,12 +514,14 @@ export const APP_SRC = `(() => {
     L.push('五、需要处理：' + (warns.length ? warns.join('；') : '无（窗口内无触发横幅/ chip 的条件）'));
     const lr = s.lossReduction || {};
     L.push('六、降损层：归因覆盖 ' + pct(lr.attributionCoverage || 0) + '｜自动恢复 ' + formatNumber(lr.autoRecovered) + '｜预检降级 ' + formatNumber(lr.precheckDegraded) + '｜重复检测 ' + formatNumber(lr.duplicateRetries));
-    const lastRun = ((agentState && agentState.runs) || [])[0];
-    L.push('七、Agent 最新' + (lastRun ? '（' + hm(lastRun.startedAt) + (lastRun.trigger === 'manual' ? ' 手动' : '') + '）：' + String((lastRun.decision && lastRun.decision.summary) || '').slice(0, 120) : '：尚无运行记录'));
+    // 运营 Agent 口径（v0.2 Phase D）：旧 runner 的「最新决策轮」已随 runner 移除——
+    // 新 Agent 是对话式，交接摘要改报在网状态读数（模型/工具/待审批），不外推「轮次」概念。
+    const agBriefOn = !!(agentState && agentState.status && agentState.status.enabled);
+    L.push('七、运营 Agent' + (agBriefOn ? '：对话式在网（模型 ' + (agentState.status.model || 'default') + ' · HTTP 工具 ' + (agentState.status.httpTools || 0) + ' 个 · 待审批 ' + (agentState.status.pendingApprovals || 0) + ' 条）' : '：未启用'));
     const plat = [];
     plat.push('B 站（8767）' + (bUp ? '运行中' : '未运行'));
     plat.push('KB ' + (kbCount == null ? '-' : kbCount + ' 篇'));
-    plat.push('Agent ' + ((agentState && agentState.status && agentState.status.enabled) ? Math.round((agentState.status.intervalMs || 0) / 60000) + ' 分钟巡检在网' : '未启用'));
+    plat.push('Agent ' + ((agentState && agentState.status && agentState.status.enabled) ? '对话式运营在网' : '未启用'));
     L.push('八、平台状态：' + plat.join('｜'));
     // Key 预警行（manual#162）：交接 artifact 必须包含『需关注』的 key——#160 的筛选首跑
     // 就抓出预算耗尽的 key（启用中但请求全 402），这类事只写在面板里会漏给接班人。
@@ -577,13 +579,11 @@ export const APP_SRC = `(() => {
     const kbDocs = kbs.reduce((a, k) => a + ((k.stats && k.stats.docs) || 0), 0);
     const kbChunks = kbs.reduce((a, k) => a + ((k.stats && k.stats.chunks) || 0), 0);
     const agSt = (agentState && agentState.status) || {};
-    const agLast = agSt.lastRun || null;
-    // 重启前标记（manual#277）：lastRun 可能是事件重建的（fromEvent）——此时『N 轮』是
-    // 进程内计数（0）而『最近 X』是全时（含重启前），两个口径混在一行会读成『从没跑过但
-    // 又有最近记录』。给重建的记录加与 Agent 页 chip 同款的『重启前』标记，口径自明。
-    const agLastTxt = agLast
-      ? (TS(agLast.startedAt) + ' · ' + ((agLast.decision && agLast.decision.kind) || '-') + (agLast.fromEvent ? '（重启前·事件重建）' : ''))
-      : '尚无运行记录';
+    // 运营 Agent 读数（v0.2 Phase D）：旧 lastRun/决策轮形状随 runner 移除——新口径是
+    // 在网状态读数（模型/HTTP 工具/待审批/会话数），由 GET /admin/api/agent 的 statusView 提供。
+    const agLastTxt = agentState && agentState.enabled
+      ? ('模型 ' + (agSt.model || 'default') + ' · HTTP 工具 ' + (agSt.httpTools || 0) + ' · 待审批 ' + (agSt.pendingApprovals || 0) + ' · 会话 ' + (agSt.sessions || 0))
+      : '配置 agent.enabled 后重启生效';
     // 错题本状态（manual#108）：用户 round-100 指令把 KB 校准文档定为运维错题本——平台能力区
     // 展示其保鲜度。Agent 同款查询的 top1 即校准文档：检索分高=错题本在位（Agent 每轮必读），
     // 分数跌落=错题本失位需校准。KB 未启用时不发这个请求（避免双倍失败调用）。
@@ -620,11 +620,11 @@ export const APP_SRC = `(() => {
         \${tile('降损层开销', '<span class="' + (lr.overheadRatio < .001 ? 'ok' : 'warn') + '">' + (lr.overheadRatio * 100).toFixed(4) + '%</span>', '预检 ' + formatNumber(ov.overheadUs.precheck) + 'µs + 归因 ' + formatNumber(ov.overheadUs.classify) + 'µs')}
       </div>
 
-      <section class="block" style="margin-top:14px"><h2>平台能力 <span class="spacer"></span><span class="dim" style="font-size:11px;text-transform:none">知识库与内部 Agent 的实时状态（manual#76 新增）</span></h2>
+      <section class="block" style="margin-top:14px"><h2>平台能力 <span class="spacer"></span><span class="dim" style="font-size:11px;text-transform:none">知识库与运营 Agent 的实时状态（manual#76 新增；v0.2 起 Agent=运营 Agent）</span></h2>
         <table>
           <tr><th>能力</th><th>状态</th><th>关键读数</th><th>入口</th></tr>
           <tr><td>知识库（KB）</td><td>\${kbState && kbState.enabled ? '<span class="ok">启用</span>' : '<span class="warn">未启用</span>'}</td><td class="mono"\${kbState && kbState.enabled && kbState.config ? ' title="' + esc(kbState.config.path + ' · 分块 ' + kbState.config.chunkSize + ' 字 / 重叠 ' + kbState.config.chunkOverlap + ' 字') + '"' : ''}>\${kbState && kbState.enabled ? formatNumber(kbs.length) + ' 个库 · ' + formatNumber(kbDocs) + ' 文档 · ' + formatNumber(kbChunks) + ' 分块' + (kbState.config ? ' <span class="dim">· ' + esc(kbState.config.path) + '</span>' : '') : '配置 kb.path 后重启生效'}</td><td><a href="#kb">知识库页签</a></td></tr>
-          <tr><td>内部 Agent</td><td>\${agentState && agentState.enabled ? (agSt.running ? '<span class="ok">运行中</span>' : '<span class="ok">启用 · 空闲</span>') : '<span class="warn">未启用</span>'}</td><td class="mono">\${agentState && agentState.enabled ? '模型 ' + esc(agSt.model) + ' · ' + formatNumber(agSt.runCount) + ' 轮 · 最近 ' + esc(agLastTxt) : '配置 agent.enabled 后重启生效'}</td><td><a href="#agent">Agent 页签</a></td></tr>
+          <tr><td>运营 Agent</td><td>\${agentState && agentState.enabled ? '<span class="ok">启用</span>' : '<span class="warn">未启用</span>'}</td><td class="mono">\${agentState && agentState.enabled ? esc(agLastTxt) : '配置 agent.enabled 后重启生效'}</td><td><a href="#agent">运营 Agent 页签</a></td></tr>
           <tr><td>错题本（运维基线）</td><td>\${ebState ? '<span class="ok">在维护</span>' : '<span class="warn">不可用</span>'}</td><td class="mono">\${ebState ? esc(ebState.docTitle) + ' · 检索分 ' + ebState.score + '（Agent 每轮必读）' : (kbState && kbState.enabled ? '校准文档未命中 top1——错题本可能失位，需校准' : '配置 kb.path 后重启生效')}</td><td><a href="#kb">知识库页签</a></td></tr>
           <tr><td>聚合站（8767 · B）</td><td>\${bUp ? '<span class="ok">运行中</span>' : '<span class="warn">未运行</span>'}</td><td class="mono">\${bUp ? 'hermes 面板可嵌入，渠道/用户/账本在运维页操作' : '停机中——重启前需验证 tokenrhythm key 与余额（门控，见错题本）'}</td><td><a href="#ops">运维页嵌入</a></td></tr>
         </table>

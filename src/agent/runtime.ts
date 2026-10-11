@@ -10,7 +10,7 @@
  * - 危险动作（needApproval）不立即执行，生成审批单，审批通过后才真正执行（异步）。
  */
 import { randomUUID } from 'node:crypto';
-import type { AgentLlmCall } from './runner.js';
+import type { AgentLlmCall } from './llm.js';
 import type { AgentMessage, AgentTool, AgentToolCall, AgentToolContext } from './types.js';
 
 /** 需审批的挂起动作（由上层生成审批单，批准后再以 approved=true 执行） */

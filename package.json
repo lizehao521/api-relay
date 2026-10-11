@@ -14,6 +14,7 @@
     "mock": "node --disable-warning=ExperimentalWarning dist/cli.js mock",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsc -p tsconfig.json && node --disable-warning=ExperimentalWarning --test \"dist/test/*.test.js\"",
+    "verify:frontend": "node scripts/verify-frontend.mjs",
     "check": "node --disable-warning=ExperimentalWarning dist/cli.js check",
     "report": "node --disable-warning=ExperimentalWarning dist/cli.js report",
     "e2e": "node --disable-warning=ExperimentalWarning --test \"dist/test/e2e.test.js\"",

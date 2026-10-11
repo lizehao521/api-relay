@@ -60,5 +60,8 @@ certs/
 # 本地快照仓（git-snapshot 后端，可重建）
 .hermess-snapshots/
 
+# 营销/提示词配图：生成物，不入库（本地保留，仓库保持纯代码）
+prompts/marketing/
+
 # 运维交接/巡检日志：含服务器路径、内网拓扑、客户运营状态，仅供本地运维
 docs/HANDOVER-*.md

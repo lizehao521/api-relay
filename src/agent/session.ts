@@ -26,13 +26,24 @@ export class AgentDb {
     this.db = db;
   }
   private get db_(): DatabaseSync { if (!this.db) throw new Error('agent db not initialized'); return this.db; }
+  /**
+   * 单行查询归一化（Node 22.x node:sqlite 坑，Node 24 已修）：
+   * .get() 无结果时返回 {列:null} 占位对象而非 undefined——所有字段为 null 视为未找到。
+   * 与 kb/store.ts getKb 同款防御。
+   */
+  private row<T>(r: unknown): T | undefined {
+    if (!r || typeof r !== 'object') return undefined;
+    const vals = Object.values(r as Record<string, unknown>);
+    if (vals.length > 0 && vals.every((v) => v === null)) return undefined;
+    return r as T;
+  }
   close(): void { this.db?.close(); this.db = undefined; }
 
   saveSession(s: StoredSession): void {
     this.db_.prepare('INSERT OR REPLACE INTO agent_session (id, kb_id, messages, created_at, updated_at) VALUES (?,?,?,?,?)').run(s.id, s.kbId ?? null, JSON.stringify(s.messages), s.createdAt, s.updatedAt);
   }
   getSession(id: string): StoredSession | undefined {
-    const r = this.db_.prepare('SELECT * FROM agent_session WHERE id=?').get(id) as any;
+    const r = this.row<any>(this.db_.prepare('SELECT * FROM agent_session WHERE id=?').get(id));
     if (!r) return undefined;
     return { id: r.id, kbId: r.kb_id ?? undefined, messages: JSON.parse(r.messages), createdAt: r.created_at, updatedAt: r.updated_at };
   }
@@ -47,7 +58,7 @@ export class AgentDb {
     return (this.db_.prepare('SELECT * FROM agent_tool').all() as any[]).map((r) => ({ name: r.name, kind: r.kind, configJson: r.config_json, enabled: !!r.enabled, createdAt: r.created_at }));
   }
   getTool(name: string): StoredTool | undefined {
-    const r = this.db_.prepare('SELECT * FROM agent_tool WHERE name=?').get(name) as any;
+    const r = this.row<any>(this.db_.prepare('SELECT * FROM agent_tool WHERE name=?').get(name));
     return r ? { name: r.name, kind: r.kind, configJson: r.config_json, enabled: !!r.enabled, createdAt: r.created_at } : undefined;
   }
   deleteTool(name: string): void { this.db_.prepare('DELETE FROM agent_tool WHERE name=?').run(name); }
@@ -56,7 +67,7 @@ export class AgentDb {
     this.db_.prepare('INSERT OR REPLACE INTO agent_approval (id, session_id, tool, payload_json, status, created_at, decided_at, actor) VALUES (?,?,?,?,?,?,?,?)').run(a.id, a.sessionId, a.tool, a.payloadJson, a.status, a.createdAt, a.decidedAt ?? null, a.actor ?? null);
   }
   getApproval(id: string): StoredApproval | undefined {
-    const r = this.db_.prepare('SELECT * FROM agent_approval WHERE id=?').get(id) as any;
+    const r = this.row<any>(this.db_.prepare('SELECT * FROM agent_approval WHERE id=?').get(id));
     if (!r) return undefined;
     return { id: r.id, sessionId: r.session_id, tool: r.tool, payloadJson: r.payload_json, status: r.status, createdAt: r.created_at, decidedAt: r.decided_at ?? undefined, actor: r.actor ?? undefined };
   }

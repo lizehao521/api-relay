@@ -202,7 +202,7 @@ export const APP_SRC = `(() => {
    */
   const I18N = {
     zh: {
-      tabs: { ov: '总览', met: '指标', users: '客户 Key', ch: '上游', kb: '知识库', agent: 'Agent', ledger: '请求账本', diag: '排障', ops: '运维', trust: '信任' },
+      tabs: { ov: '总览', met: '指标', users: '客户 Key', ch: '上游', kb: '知识库', agent: '运营 Agent', ledger: '请求账本', diag: '排障', ops: '运维', trust: '信任' },
       panel: '管理面板', win: '窗口', autoRefresh: '自动刷新', refreshEvery: '刷新间隔',
       refresh: '刷新', logout: '退出', login: '登录', retry: '重试',
       loadFailed: '加载失败', loading: '加载中...',
@@ -214,7 +214,7 @@ export const APP_SRC = `(() => {
       shortcutHint: '快捷键: r=刷新, 1-9=切换页签, /=搜索, Esc=关闭',
     },
     en: {
-      tabs: { ov: 'Overview', met: 'Metrics', users: 'Client Keys', ch: 'Upstreams', kb: 'Knowledge', agent: 'Agent', ledger: 'Request Log', diag: 'Diagnose', ops: 'Ops', trust: 'Trust' },
+      tabs: { ov: 'Overview', met: 'Metrics', users: 'Client Keys', ch: 'Upstreams', kb: 'Knowledge', agent: 'Agent Ops', ledger: 'Request Log', diag: 'Diagnose', ops: 'Ops', trust: 'Trust' },
       panel: 'Admin Panel', win: 'Window', autoRefresh: 'Auto refresh', refreshEvery: 'Interval',
       refresh: 'Refresh', logout: 'Sign out', login: 'Sign in', retry: 'Retry',
       loadFailed: 'Load failed', loading: 'Loading...',
@@ -233,7 +233,7 @@ export const APP_SRC = `(() => {
 
   const TABS = [
     ['ov', '总览'], ['met', '指标'], ['users', '客户 Key'], ['ch', '上游'],
-    ['kb', '知识库'], ['agent', 'Agent'], ['ledger', '请求账本'], ['diag', '排障'], ['ops', '运维'], ['trust', '信任'],
+    ['kb', '知识库'], ['agent', '运营 Agent'], ['ledger', '请求账本'], ['diag', '排障'], ['ops', '运维'], ['trust', '信任'],
   ];
   // 页签进 URL hash：刷新/收藏/分享都停在同一个页面，也能被直接打开（便于截图与排查）
   const TAB_IDS = TABS.map(([id]) => id);
@@ -2252,171 +2252,146 @@ print(resp.choices[0].message.content)</pre>
   /* ============ Agent（内部运维/迭代决策环） ============ */
   async function vAgent() {
     const host = $('main');
-    let st;
-    try { st = await api('agent'); } catch (e) { if (e.status === 404 || e.status === 503) { st = { enabled: false }; } else { throw e; } }
-
-    if (!st || !st.enabled) {
+    // 探测运营 Agent（新端点 agent/tools；404/503 = 未启用或旧版网关）
+    let tl;
+    try { tl = await api('agent/tools'); } catch (e) { if (e.status === 404 || e.status === 503) { tl = null; } else throw e; }
+    if (!tl) {
       host.innerHTML =
-        '<div class="note"><b>内部 Agent 系统未启用。</b>在配置里加 <span class="mono">agent.enabled: true</span> 并指定 <span class="mono">agent.clientId</span>（本网关 clients 里的一条 key）与 <span class="mono">agent.model</span> 后重启网关即可。' +
-        ' Agent 会周期性（或手动）读网关运营快照 → 调网关自身 LLM 分析 → 产出运维/迭代建议 → 沉淀到知识库 → 记审计事件。</div>' +
-        '<div class="dim" style="font-size:12px">当前：' + esc(JSON.stringify(st || {})) + '</div>';
+        '<div class="note"><b>运营 Agent（平台规则 Agent）未启用。</b>配置里加 <span class="mono">agent.enabled: true</span> 并指定 <span class="mono">agent.clientId</span>（clients 里的一条 key）与 <span class="mono">agent.model</span> 后重启网关即可。' +
+        ' Agent 的工具=平台能力+外部 HTTP 工具（受出口闸门约束）；写操作自动挂审批单（异步，批准后执行）。</div>';
       return;
     }
 
-    const status = st.status || {};
+    let sessionId = null;
     host.innerHTML =
-      '<div class="note"><b>内部 Agent 系统。</b>自托管运维/迭代决策环：网关读自身运营数据 → 调网关自身 LLM → 产出建议 → 写 KB + 审计。' +
-      ' 安全边界：Agent 只产"建议"不执行配置变更；LLM 调用走完整计量链路（client_kind=agent 可识别）。</div>' +
-      '<section class="block"><h2>Agent 状态</h2>' +
-      '<table><tr><th>启用</th><th>模型</th><th>clientId</th><th>巡检周期</th><th>KB 沉淀</th><th>自动写 KB</th><th>运行中</th><th>历史轮数</th><th>baseURL</th></tr>' +
-      '<tr><td>' + (status.enabled ? '是' : '否') + '</td><td class="mono">' + esc(status.model) + '</td><td class="mono">' + esc(status.clientId) + '</td>' +
-      '<td class="mono">' + (status.intervalMs ? Math.round(status.intervalMs / 60000) + ' min' : '仅手动') + '</td>' +
-      '<td class="mono">' + esc(status.kbId || '-') + '</td><td>' + (status.autoWriteKb ? '是' : '否') + '</td>' +
-      '<td class="mono">' + (status.running ? '运行中' : '空闲') + '</td><td class="mono">' + formatNumber(status.runCount) + '</td>' +
-      '<td class="mono dim" style="font-size:11px">' + esc(status.baseUrl) + '</td></tr></table>' +
-      // 运行中置灰（manual#347）：状态表已显示「运行中」，但按钮仍可点——点了必吃 409
-      // toast（后端 isRunning 守卫）。既然状态已知，就把必失败的动作前置禁掉：
-      // 按钮禁用+文案说明，跑完（15s 自动刷新带回 running=false）自然恢复。
-      '<div style="margin-top:10px"><button class="btn" id="agent-run"' + (status.running ? ' disabled' : '') + '>' +
-      (status.running ? '运行中…（LLM 一轮 10-20 秒）' : '立即跑一轮') + '</button></div>' +
-      '</section>' +
-      '<section class="block"><h2>最近一轮决策</h2><div id="agent-last"><div class="dim">尚无运行记录</div></div></section>' +
-      '<section class="block"><h2>决策历史</h2><div id="agent-runs"></div></section>';
+      '<div class="note"><b>运营 Agent。</b>多轮对话 + 平台工具（KB 检索/问答、key 核查、流量健康、事件排查）+ 外部 HTTP 工具（出口闸门拦内网/元数据）。' +
+      ' 写操作（POST/PUT/DELETE/PATCH）自动挂审批单，批准后异步执行；GET 免审批。所有 LLM 调用走本网关计量链路（client_kind=agent）。</div>' +
+      '<section class="block"><h2>对话</h2>' +
+      '<div id="ao-log" style="max-height:340px;overflow:auto;border:1px solid var(--bd);border-radius:6px;padding:10px;margin-bottom:8px"><div class="dim" style="font-size:12px">在下面输入运营问题，例如「最近有没有鉴权失败激增？」「知识库里 XX 怎么配置？」</div></div>' +
+      '<div style="display:flex;gap:8px"><textarea id="ao-in" rows="2" style="flex:1" placeholder="给运营 Agent 发消息…"></textarea>' +
+      '<button class="btn" id="ao-send">发送</button></div>' +
+      '<div class="dim" style="font-size:11px;margin-top:4px" id="ao-sid">新会话</div></section>' +
+      '<section class="block"><h2>审批队列</h2><div id="ao-appr"><div class="dim">加载中…</div></div></section>' +
+      '<section class="block"><h2>工具</h2><div id="ao-tools"></div>' +
+      '<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+      '<input id="ao-tname" placeholder="工具名(字母开头)" style="width:150px">' +
+      '<select id="ao-tmethod"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select>' +
+      '<input id="ao-turl" placeholder="https://api.example.com/path" style="flex:1;min-width:220px">' +
+      '<input id="ao-tdesc" placeholder="说明(可选)" style="width:140px">' +
+      '<button class="btn" id="ao-tadd">注册</button></div>' +
+      '<div class="dim" style="font-size:11px;margin-top:4px">写操作方法注册后调用时自动挂审批单；出口闸门拒绝内网/保留/云元数据地址。</div></section>' +
+      '<section class="block"><h2>执行历史</h2><div id="ao-hist"><div class="dim">尚无记录</div></div></section>';
 
-    const renderRun = (r, full, idx) => {
-      const d = r.decision || {};
-      return '<div class="card" style="margin-bottom:10px">' +
-        '<div style="display:flex;justify-content:space-between;margin-bottom:6px">' +
-        '<b>' + (r.trigger === 'auto' ? '自动巡检' : '手动触发') + ' · ' + (d.kind || 'none') + ' · 置信 ' + formatNumber(d.confidence) + '</b>' +
-        // 事件重建标记（manual#255）：进程重启后内存运行记录清空，这一轮是从持久事件库
-        // 重建的（耗时/token 为 0——事件不记这些）——不给标记运营会以为数据错了。
-        (r.fromEvent ? ' <span class="chip y" style="font-size:10px" title="进程重启过——内存里的运行记录已清空，这一轮由事件库的 agent.decision 重建；耗时与 token 为 0（事件不记）">重启前·事件重建</span>' : '') +
-        (r.model ? ' <span class="chip" style="font-size:10px" title="本轮决策所用模型（换模型后对比效果时看这里）">' + esc(r.model) + '</span>' : '') +
-        '<span style="display:flex;gap:8px;align-items:center"><span class="mono dim" style="font-size:11px">' + TS(r.startedAt) + ' · ' + r.durationMs + 'ms · ' + formatNumber(r.promptTokens) + '/' + formatNumber(r.completionTokens) + ' tok</span>' +
-        '<button class="bare" data-run-copy="' + idx + '" title="复制本轮决策（摘要+建议+证据）">复制</button></span></div>' +
-        '<div class="note" style="margin:0 0 6px">' + esc(d.summary || '') + '</div>' +
-        '<div style="font-size:13px;margin-bottom:6px"><b>建议：</b>' + esc(d.recommendation || '') + '</div>' +
-        (d.evidence && d.evidence.length ? '<div class="dim" style="font-size:12px;margin-bottom:6px"><b>证据：</b>' + d.evidence.map(esc).join(' | ') + '</div>' : '') +
-        // kbNote 展示（manual#184）：AgentDecision.kbNote（kind=kb/iteration 时给的要写入 KB 的
-        // 迭代知识）此前渲染面缺失——agent 产出知识沉淀建议时界面直接丢掉，运营看不到也抄不走。
-        (d.kbNote ? '<div class="note" style="margin:0 0 6px"><b>知识沉淀建议</b>（agent 建议写入 KB 的内容）' +
-          '<div style="margin-top:4px"><b>' + esc(d.kbNote.title || '') + '</b></div>' +
-          '<div class="dim" style="font-size:12px;margin-top:2px;white-space:pre-wrap">' + esc(d.kbNote.content || '') + '</div>' +
-          '<button class="bare" data-kbn-copy="' + idx + '" style="margin-top:4px" title="复制标题+正文，可直接贴进 KB 灌入表单">复制</button>' +
-          '<button class="bare" data-kbn-write="' + idx + '" style="margin-top:4px" title="一键写入知识库 kb-demo（错题本）——source 标 agent，事件日志留痕；与复制并存，习惯哪个用哪个">写入 KB</button></div>' : '') +
-        (r.error ? '<div class="note" style="border-color:#c0392b;color:#c0392b;margin:0">出错：' + esc(r.error) + '</div>' : '') +
-        '</div>';
+    const aoLog = (role, html) => {
+      const log = host.querySelector('#ao-log');
+      const d = document.createElement('div');
+      d.style.marginBottom = '8px';
+      d.innerHTML = '<span class="chip" style="font-size:10px">' + role + '</span> ' + html;
+      log.appendChild(d);
+      log.scrollTop = log.scrollHeight;
     };
 
-    // 决策卡复制（manual#91）：Agent 建议要贴进工作记录/会话——序列化整轮（触发/类型/置信/耗时/token/摘要/建议/证据/错误）。
-    // 注意：本文件是外层 HTML 模板字面量，字符串里的换行必须双写 \\n，否则被外层吞成真实换行（#88 同款坑）。
-    const bindRunCopy = (container, runs) => {
-      if (!container) return;
-      container.querySelectorAll('[data-run-copy]').forEach((btn) => {
-        const r = runs[Number(btn.dataset.runCopy)];
-        if (!r) return;
-        btn.addEventListener('click', () => {
-          const d = r.decision || {};
-          const text =
-            '[' + (r.trigger === 'auto' ? '自动巡检' : '手动触发') + '] · ' + (d.kind || 'none') + ' · 置信 ' + d.confidence +
-            (r.model ? ' · 模型 ' + r.model : '') + '\\n' +
-            '时间: ' + TS(r.startedAt) + ' · ' + r.durationMs + 'ms · ' + r.promptTokens + '/' + r.completionTokens + ' tok\\n' +
-            '摘要: ' + (d.summary || '') + '\\n' +
-            '建议: ' + (d.recommendation || '') +
-            (d.evidence && d.evidence.length ? '\\n证据: ' + d.evidence.join(' | ') : '') +
-            (d.kbNote ? '\\n知识沉淀建议: ' + (d.kbNote.title || '') + '\\n' + (d.kbNote.content || '') : '') +
-            (r.error ? '\\n错误: ' + r.error : '');
-          copyText(text, 'Agent 决策已复制（摘要+建议+证据' + (d.kbNote ? '+知识沉淀' : '') + '）');
-        });
-        // kbNote 单独复制（manual#184）：标题+正文直接贴进 KB 灌入表单——比复制整轮再摘抄省一步。
-        container.querySelectorAll('[data-kbn-copy]').forEach((btn) => {
-          const rr = runs[Number(btn.dataset.kbnCopy)];
-          const n = rr && rr.decision && rr.decision.kbNote;
-          if (!n) return;
-          btn.addEventListener('click', () => copyText('# ' + (n.title || '') + '\\n' + (n.content || ''), '知识沉淀建议已复制（标题+正文）'));
-        });
-        // 一键写入 KB（manual#185）：agent→kbNote→KB 知识回流链的最后一环——此前只能复制再手动
-        // 灌（两跳），现在一键落库。source='agent' 可在文档表区分来源；store 自动记 kb.doc_add
-        // 事件（留痕）。防连点：写入中禁用按钮。目标库固定 kb-demo（错题本，约定3 的基准库）。
-        container.querySelectorAll('[data-kbn-write]').forEach((btn) => {
-          const rr = runs[Number(btn.dataset.kbnWrite)];
-          const n = rr && rr.decision && rr.decision.kbNote;
-          if (!n) return;
-          btn.addEventListener('click', async () => {
-            if (btn.disabled) return;
-            btn.disabled = true;
-            const orig = btn.textContent;
-            btn.textContent = '写入中…';
-            try {
-              const r = await api('kb/kb-demo/docs', { method: 'POST', body: JSON.stringify({ title: n.title || '(agent 建议)', content: n.content || '', source: 'agent' }) });
-              toast('已写入知识库：文档 #' + (r.doc && r.doc.id) + '（' + esc(n.title || '') + '，source=agent）', 'g');
-              btn.textContent = '已写入 ✓';
-            } catch (e) {
-              toast('写入失败：' + esc(e.message), 'r');
-              btn.textContent = orig;
-              btn.disabled = false;
-            }
-          });
-        });
-      });
+    const refreshTools = () => {
+      const rows = (tl.tools || []).map((t) =>
+        '<tr><td class="mono">' + esc(t.name) + '</td><td>' + (t.kind === 'http' ? '<span class="chip y">http</span>' : '<span class="chip b">内置</span>') + '</td>' +
+        '<td class="mono" style="font-size:11px">' + esc(t.description || '') + '</td>' +
+        '<td>' + (t.kind === 'http' ? '<button class="bare" data-tdel="' + esc(t.name) + '">删除</button>' : '') + '</td></tr>').join('');
+      host.querySelector('#ao-tools').innerHTML = '<table><tr><th>工具</th><th>类型</th><th>说明</th><th></th></tr>' + rows + '</table>';
+      host.querySelectorAll('[data-tdel]').forEach((btn) => btn.addEventListener('click', async () => {
+        try {
+          await api('agent/tools/' + encodeURIComponent(btn.dataset.tdel), { method: 'DELETE' });
+          toast('已删除工具 ' + esc(btn.dataset.tdel), 'g');
+          tl = await api('agent/tools');
+          refreshTools();
+        } catch (e) { toast('删除失败：' + esc(e.message), 'r'); }
+      }));
     };
 
-    const refreshLast = async () => {
-      let last;
-      try { last = (await api('agent/last')).last; } catch (e) { last = null; }
-      host.querySelector('#agent-last').innerHTML = last ? renderRun(last, true, 0) : '<div class="dim">尚无运行记录，点"立即跑一轮"触发</div>';
-      host.querySelectorAll('#agent-last button')[0]?.addEventListener('click', doRun);
-      if (last) bindRunCopy(host.querySelector('#agent-last'), [last]);
+    const refreshAppr = async () => {
+      let d;
+      try { d = await api('agent/approvals?status=pending'); } catch { d = { approvals: [] }; }
+      const list = d.approvals || [];
+      host.querySelector('#ao-appr').innerHTML = list.length ? list.map((a) =>
+        '<div class="card" style="margin-bottom:8px"><b>' + esc(a.tool) + '</b> <span class="mono dim" style="font-size:11px">' + TS(a.created_at) + '</span>' +
+        '<div class="dim" style="font-size:12px;margin:4px 0">' + esc(JSON.stringify(a.payload)) + '</div>' +
+        '<button class="btn" data-aok="' + esc(a.id) + '">批准并执行</button> ' +
+        '<button class="bare" data-aorno="' + esc(a.id) + '">拒绝</button></div>').join('')
+        : '<div class="dim">没有待审批的写操作</div>';
+      host.querySelectorAll('[data-aok]').forEach((btn) => btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          const r = await api('agent/approvals/' + encodeURIComponent(btn.dataset.aok), { method: 'POST', body: JSON.stringify({ action: 'approve', actor: 'panel' }) });
+          toast('已批准并执行：' + esc(r.executed ? (r.executed.ok ? '成功' : '失败：' + String(r.executed.content).slice(0, 60)) : ''), r.executed && r.executed.ok ? 'g' : 'y');
+          if (r.executed) aoLog('审批', esc('工具执行结果：' + r.executed.content.slice(0, 500)));
+          refreshAppr(); refreshHist();
+        } catch (e) { toast('审批失败：' + esc(e.message), 'r'); btn.disabled = false; }
+      }));
+      host.querySelectorAll('[data-aorno]').forEach((btn) => btn.addEventListener('click', async () => {
+        try {
+          await api('agent/approvals/' + encodeURIComponent(btn.dataset.aorno), { method: 'POST', body: JSON.stringify({ action: 'reject', actor: 'panel' }) });
+          toast('已拒绝', 'y'); refreshAppr();
+        } catch (e) { toast('操作失败：' + esc(e.message), 'r'); }
+      }));
     };
 
-    const refreshRuns = async () => {
-      const d = await api('agent/runs?limit=15');
+    const refreshHist = async () => {
+      let d;
+      try { d = await api('agent/history?limit=20'); } catch { d = { runs: [] }; }
       const runs = d.runs || [];
-      host.querySelector('#agent-runs').innerHTML = runs.length
-        ? runs.map((r, i) => renderRun(r, false, i)).join('')
-        : '<div class="dim">尚无运行记录</div>';
-      bindRunCopy(host.querySelector('#agent-runs'), runs);
+      host.querySelector('#ao-hist').innerHTML = runs.length ? runs.map((r) =>
+        '<div class="card" style="margin-bottom:6px;padding:6px 10px">' +
+        '<span class="mono" style="font-size:12px">' + esc(r.tool) + '</span> ' +
+        (r.ok ? '<span class="chip g" style="font-size:10px">ok</span>' : '<span class="chip r" style="font-size:10px">fail</span>') +
+        ' <span class="mono dim" style="font-size:11px">' + TS(r.createdAt) + '</span>' +
+        '<div class="dim" style="font-size:12px">' + esc(r.summary) + '</div></div>').join('')
+        : '<div class="dim">尚无记录</div>';
     };
 
-    const doRun = async () => {
-      const btn = host.querySelector('#agent-run');
-      if (btn && btn.disabled) return;
-      if (btn) { btn.disabled = true; btn.textContent = '触发中…'; }
+    host.querySelector('#ao-send').addEventListener('click', async () => {
+      const btn = host.querySelector('#ao-send');
+      const inp = host.querySelector('#ao-in');
+      const msg = (inp.value || '').trim();
+      if (!msg || btn.disabled) return;
+      btn.disabled = true;
+      inp.value = '';
+      aoLog('运营', esc(msg));
       try {
-        await api('agent', { method: 'POST', body: JSON.stringify({}) });
-        toast('已触发，本轮结果稍后自动出现（LLM 一轮 10-20 秒）');
-        // 短轮询链（manual#201/#332）：原 4s 单次刷新必然空转（LLM 要 10-20s），结果实际靠
-        // 15s 自动刷新才出现——触发后最多干等一个周期。#201 改 8/16/24s 三次轮询；#332 复测
-        // 发现 report p95 已 28.4s、ask e2e 实测有超 120s 的尾部——24s 止步会让慢轮次落回
-        // 15s tick（最坏 ~43s 才见结果）。延到 8/16/24/32/40/48s 六次覆盖 p95+：出现「本轮
-        // 之后的新 run」即停（早到早停），48s 仍无才交给自动刷新兜底。VIEW 守卫保证切页即停。
-        const triggerAt = Date.now();
-        for (const delay of [8000, 16000, 24000, 32000, 40000, 48000]) {
-          setTimeout(async () => {
-            if (VIEW !== 'agent') return;
-            try {
-              const d = await api('agent/runs?limit=3');
-              const fresh = (d.runs || []).some((r) => r.startedAt >= triggerAt - 1000);
-              await refreshLast(); await refreshRuns();
-              if (fresh) return;
-            } catch { /* 轮询失败静默——自动刷新仍会兜底 */ }
-          }, delay);
+        const body = { message: msg };
+        if (sessionId) body.session_id = sessionId;
+        const r = await api('agent/chat', { method: 'POST', body: JSON.stringify(body) });
+        sessionId = r.session_id;
+        host.querySelector('#ao-sid').textContent = '会话 ' + String(sessionId).slice(0, 8);
+        aoLog('Agent', esc(r.reply || '(空回复)'));
+        if (r.approvals_pending && r.approvals_pending.length) {
+          aoLog('系统', '<span class="chip y">已挂 ' + r.approvals_pending.length + ' 条审批单——下方「审批队列」批准后执行</span>');
+          refreshAppr();
         }
       } catch (e) {
-        // 409=上一轮仍在运行（manual#192）：后端 agentTrigger 的预期语义（防重入），
-        // 不是故障——按红色「触发失败」显示会让运营以为出了 bug。黄色告知+原因即可。
-        if (e && e.status === 409) toast('上一轮 Agent 还在跑，稍后再点（LLM 一轮 10-20 秒）', 'y');
-        else if (e && e.status === 503) toast('Agent 系统未启用（配置里开 agent.enabled）', 'y');
-        else toast('触发失败：' + esc(e.message), 'r');
-      } finally {
-        if (btn) { btn.disabled = false; btn.textContent = '立即跑一轮'; }
-      }
-    };
-    host.querySelector('#agent-run').addEventListener('click', doRun);
+        aoLog('系统', '<span style="color:#c0392b">发送失败：' + esc(e.message) + '</span>');
+      } finally { btn.disabled = false; inp.focus(); }
+    });
+    host.querySelector('#ao-in').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); host.querySelector('#ao-send').click(); } });
 
-    await refreshLast();
-    await refreshRuns();
+    host.querySelector('#ao-tadd').addEventListener('click', async () => {
+      const name = (host.querySelector('#ao-tname').value || '').trim();
+      const method = host.querySelector('#ao-tmethod').value;
+      const url = (host.querySelector('#ao-turl').value || '').trim();
+      const description = (host.querySelector('#ao-tdesc').value || '').trim();
+      if (!name || !url) { toast('工具名与 URL 必填', 'y'); return; }
+      try {
+        await api('agent/tools', { method: 'POST', body: JSON.stringify({ name, method, url, description }) });
+        toast('已注册工具 ' + esc(name) + (method === 'GET' ? '（GET 免审批）' : '（写操作，调用时挂审批单）'), 'g');
+        tl = await api('agent/tools');
+        refreshTools();
+        host.querySelector('#ao-tname').value = ''; host.querySelector('#ao-turl').value = ''; host.querySelector('#ao-tdesc').value = '';
+      } catch (e) { toast('注册失败：' + esc(e.message), 'r'); }
+    });
+
+    refreshTools();
+    refreshAppr();
+    refreshHist();
   }
+
 
   /* ============ 排障（事件日志 / 鉴权失败 / 归因目录） ============ */
   async function vDiag() {

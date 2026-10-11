@@ -65,3 +65,6 @@ prompts/marketing/
 
 # 运维交接/巡检日志：含服务器路径、内网拓扑、客户运营状态，仅供本地运维
 docs/HANDOVER-*.md
+
+# 调试用 Node 二进制（本地复现 CI 用，不入库）
+node22/

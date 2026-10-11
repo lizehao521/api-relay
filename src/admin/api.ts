@@ -38,6 +38,8 @@ import { dashboardHtml } from './dashboard.js';
 import { gzipSync } from 'node:zlib';
 import { KbStore } from '../kb/store.js';
 import type { AgentRunner } from '../agent/runner.js';
+import { AgentOpsHandlers } from './handlers/agentOps.js';
+import type { AgentOps } from '../agent/ops.js';
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
@@ -55,6 +57,8 @@ export interface AdminDeps {
   kb?: KbStore | undefined;
   /** 内部 Agent 系统（自托管运维/迭代决策环；undefined = 未启用） */
   agent?: AgentRunner | undefined;
+  /** 运营 Agent（平台规则 Agent；undefined = 未启用） */
+  agentOps?: AgentOps | undefined;
   serverStats: () => { requestCount: number; inflight: number; uptimeMs: number };
 }
 
@@ -69,6 +73,8 @@ export class AdminApi {
     // agent 用惰性 getter：app.ts 在 AdminApi 构造**之后**才创建 AgentRunner 并回填
     // deps.agent。按值捕获会拿到构造那刻的 undefined（本层实际踩到的回归）。
     this.agent = new AgentHandlers({ store: deps.store, logger: deps.logger, agent: () => deps.agent });
+    // 运营 Agent 子路由（chat/sessions/tools/approvals/history）；惰性取值同上约束
+    this.agentOps = new AgentOpsHandlers({ ops: () => deps.agentOps, logger: deps.logger });
     // budgetWatch 传的是 Map 引用（该引用从不重新赋值，只 get/set/delete）——
     // 与 agent 那个坑不同：那里是「构造后才赋值的 undefined」，这里共享同一个可变对象。
     this.keys = new KeyHandlers({
@@ -167,6 +173,8 @@ export class AdminApi {
   private readonly kb: KbHandlers;
   /** Agent handler（P2 拆分第四层：见 handlers/agent.ts） */
   private readonly agent: AgentHandlers;
+  /** 运营 Agent handler（平台规则 Agent：见 handlers/agentOps.ts） */
+  private readonly agentOps: AgentOpsHandlers;
   /** key 生命周期 handler（P2 拆分第四层：见 handlers/keys.ts） */
   private readonly keys: KeyHandlers;
   /** 进化方向 handler（P2 拆分第四层：见 handlers/evolution.ts） */
@@ -751,6 +759,9 @@ export class AdminApi {
       return json(res, 405, { error: { message: `agent 集合端点只支持 GET/POST，收到 ${req.method}`, type: 'method_not_allowed', code: 'method_not_allowed' } });
     }
     if (action.startsWith('agent/')) {
+      // 运营 Agent 子路由优先分流（chat/sessions/tools/approvals/history）；
+      // 旧 agent handler 继续管 last/runs（Phase D 整合后移除）
+      if (this.agentOps.handles(action)) return this.agentOps.dispatch(req.method ?? 'GET', action, url, body, res, actor);
       return this.agentRoute(req.method ?? 'GET', action, url, body, res, actor);
     }
 

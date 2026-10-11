@@ -21,6 +21,7 @@ import { KbStore } from './kb/store.js';
 import { AgentRunner } from './agent/runner.js';
 import { createAgentLlm } from './agent/llm.js';
 import { createAgentContext } from './agent/context.js';
+import { AgentOps } from './agent/ops.js';
 
 export interface App {
   config: RelayConfig;
@@ -30,6 +31,8 @@ export interface App {
   kb?: KbStore | undefined;
   /** 内部 Agent 系统（自托管运维/迭代决策环；未启用时 undefined） */
   agent?: AgentRunner | undefined;
+  /** 运营 Agent（平台规则 Agent；未启用时 undefined） */
+  agentOps?: AgentOps | undefined;
   pool: ProviderPool;
   router: Router;
   keys: KeyRegistry;
@@ -106,6 +109,19 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
 
   const engine = new Engine({ config, logger, store, pool, router, keys, meter, traceStore });
 
+  /* ---------- 运营 Agent（平台规则 Agent；未启用则不建） ---------- */
+  let agentOps: AgentOps | undefined;
+  if (config.agent?.enabled) {
+    const agentKeyRec = config.clients.find((c) => c.id === config.agent!.clientId);
+    agentOps = new AgentOps({
+      agentConfig: config.agent,
+      storagePath: config.storage.path,
+      agentKey: agentKeyRec?.key ?? '',
+      logger,
+      kb, store, router,
+    });
+  }
+
   const admin: AdminApi = new AdminApi({
     config,
     logger,
@@ -117,6 +133,7 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
     store,
     traceStore,
     kb,
+    agentOps,
     serverStats: () => server.stats,
   });
   /* ---------- 内部 Agent 系统（自托管运维/迭代决策环；未启用则不建） ---------- */
@@ -156,6 +173,7 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
     store,
     kb,
     agent,
+    agentOps,
     pool,
     router,
     keys,
@@ -170,6 +188,10 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
       if (agent) {
         agent.setBaseUrl(bound.url);
         agent.start();
+      }
+      if (agentOps) {
+        agentOps.setBaseUrl(bound.url);
+        agentOps.start();
       }
       logger.info('relay.listening', {
         url: bound.url,
@@ -186,6 +208,7 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
     },
     async shutdown() {
       agent?.stop();
+      agentOps?.stop();
       await server.close(config.server.shutdownGraceMs);
       await store.close();
       await kb?.close();

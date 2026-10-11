@@ -54,6 +54,30 @@ test('agentops: runtime 工具循环——调用→回填→最终答复', async
   assert.equal(r.pending.length, 0, '无审批挂起');
 });
 
+
+test('agentops: AC1——同一对话连续调用 >=2 个平台工具后产出最终答复', async () => {
+  const calls: string[] = [];
+  const mk = (name: string): AgentTool => ({
+    name,
+    description: name,
+    parameters: { type: 'object', properties: {} },
+    async run() { calls.push(name); return { ok: true, content: name + '-result' }; },
+  });
+  const rt = new AgentRuntime({
+    llm: fakeLlm([
+      toolCallJson('tool_a', { q: '1' }),
+      toolCallJson('tool_b', { q: '2' }),
+      '综合答复',
+    ]),
+    tools: [mk('tool_a'), mk('tool_b')],
+  });
+  const r = await rt.chat({ sessionId: 's-ac1', messages: [{ role: 'user', content: '查两个来源' }] });
+  assert.deepEqual(calls, ['tool_a', 'tool_b'], '两个工具应按 LLM 顺序各执行一次');
+  assert.equal(r.toolCalls.length, 2, '两次工具调用都应留痕');
+  assert.equal(r.reply, '综合答复');
+  const toolMsgs = r.messages.filter((m) => m.role === 'tool');
+  assert.equal(toolMsgs.length, 2, '两个结果都应回填会话');
+});
 test('agentops: runtime 未知工具容错（不炸循环）', async () => {
   const rt = new AgentRuntime({ llm: fakeLlm([toolCallJson('nope', {}), '兜底答复']), tools: [] });
   const r = await rt.chat({ sessionId: 's2', messages: [{ role: 'user', content: '测' }] });

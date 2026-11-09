@@ -18,6 +18,7 @@ import type { RelayConfig } from '../core/types.js';
 import { Logger } from '../core/logger.js';
 import { shortId } from '../util/index.js';
 import type { AdminApi } from '../admin/api.js';
+import type { BizService } from '../biz/index.js';
 
 export interface ServerDeps {
   config: RelayConfig;
@@ -28,6 +29,8 @@ export interface ServerDeps {
   kb?: import('../kb/store.js').KbStore | undefined;
   /** key 注册表（用于 KB allowedKeys 校验） */
   keys?: import('./keys.js').KeyRegistry | undefined;
+  /** 扫码次数包业务（启用时由 server 直接挂载 /biz /s /pay） */
+  biz?: BizService | undefined;
 }
 
 const RELAY_VERSION = '0.1.0';
@@ -141,12 +144,25 @@ export class RelayServer {
           description: 'OpenAI 兼容的模型 API 聚合中转站，内嵌传话层工程降损（P2 预检 / P3 失败归因 / P8 损耗度量）',
           endpoints: {
             chat: 'POST /v1/chat/completions',
+            images: 'POST /v1/images/generations',
             embeddings: 'POST /v1/embeddings',
             completions: 'POST /v1/completions',
             models: 'GET /v1/models',
             health: 'GET /healthz',
             admin: 'GET /admin/api/overview（需 X-Admin-Token）',
             explain: 'GET /v1/attribution/catalog（错误归因目录，便于客户端预先处理）',
+            ...(this.deps.biz
+              ? {
+                  biz: 'GET /biz（商家台：买次数包/出码/核销）',
+                  scan: 'GET /s/:code（顾客扫码即用）',
+                  bizApi: '/biz/api/*（次数包业务接口）',
+                  ...(this.deps.biz.machinePayProviderId
+                    ? {
+                        machinePay: `POST /agent/v1/chat/completions（HTTP 402 按次付费，${this.deps.biz.machinePayProviderId}）`,
+                      }
+                    : {}),
+                }
+              : {}),
           },
           loss_reduction: {
             precheck: 'P2 调用前意图预检（fail-open）',
@@ -162,6 +178,19 @@ export class RelayServer {
       const handled = await this.deps.admin.handle(req, res, url, headers, requestId);
       if (handled) return;
       return this.writeJson(res, 404, JSON.stringify({ error: { message: `未知管理接口 ${path}`, type: 'not_found_error', code: 'not_found' } }));
+    }
+
+    /* ---------- 扫码次数包业务（/biz 商家台、/s 顾客扫码、/pay mock 收银台） ---------- */
+    if (
+      this.deps.biz &&
+      (path === '/biz' ||
+        path.startsWith('/biz/') ||
+        path.startsWith('/s/') ||
+        path.startsWith('/pay/') ||
+        path.startsWith('/agent/'))
+    ) {
+      const handled = await this.deps.biz.handle(req, res, url, headers, requestId);
+      if (handled) return;
     }
 
     /* ---------- 本机只读端点（供本机面板/插件读取，默认不对外） ----------
@@ -314,7 +343,14 @@ export class RelayServer {
     }
 
     /* ---------- 业务端点 ---------- */
-    const supported = ['/v1/chat/completions', '/v1/embeddings', '/v1/completions', '/v1/responses', '/v1/messages'];
+    const supported = [
+      '/v1/chat/completions',
+      '/v1/images/generations',
+      '/v1/embeddings',
+      '/v1/completions',
+      '/v1/responses',
+      '/v1/messages',
+    ];
     if (!supported.includes(path)) {
       return this.writeJson(
         res,

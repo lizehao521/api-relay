@@ -9,6 +9,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseYaml, interpolateTree } from './yaml.js';
 import type {
+  BusinessConfig,
   ClientKeyConfig,
   LossReductionConfig,
   ProviderConfig,
@@ -154,6 +155,53 @@ export function defaultConfig(): RelayConfig {
 
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
 
+export function defaultBusinessConfig(): BusinessConfig {
+  return {
+    enabled: false,
+    sessionTtlHours: 12,
+    costCapRatio: 0.9,
+    merchantName: '外卖 AI 商家',
+    packs: [],
+    payments: { provider: 'mock' },
+  };
+}
+
+export function normalizeBusiness(input: BusinessConfig | undefined): BusinessConfig | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const d = defaultBusinessConfig();
+  const ttl = Number(input.sessionTtlHours);
+  const ratio = Number(input.costCapRatio);
+  return {
+    enabled: input.enabled === true,
+    ...(input.publicBaseUrl ? { publicBaseUrl: input.publicBaseUrl.replace(/\/+$/, '') } : {}),
+    ...(input.storagePath ? { storagePath: input.storagePath } : {}),
+    sessionTtlHours: Number.isFinite(ttl) && ttl > 0 ? ttl : d.sessionTtlHours,
+    costCapRatio: Number.isFinite(ratio) && ratio > 0 && ratio <= 1 ? ratio : d.costCapRatio,
+    merchantName: (input.merchantName ?? d.merchantName ?? '').trim() || d.merchantName || '',
+    packs: Array.isArray(input.packs) ? input.packs : [],
+    payments: {
+      provider: input.payments?.provider === 'alipay' ? 'alipay' : 'mock',
+      ...(input.payments?.alipay ? { alipay: input.payments.alipay } : {}),
+    },
+    ...(input.machinePay ? { machinePay: normalizeMachinePay(input.machinePay) } : {}),
+  };
+}
+
+function normalizeMachinePay(input: NonNullable<BusinessConfig['machinePay']>): NonNullable<BusinessConfig['machinePay']> {
+  const minutes = Number(input.payBeforeMinutes);
+  const price = Number(input.priceCny);
+  return {
+    enabled: input.enabled === true,
+    provider: input.provider === 'alipay' ? 'alipay' : 'mock',
+    serviceId: String(input.serviceId ?? '').trim(),
+    priceCny: Number.isFinite(price) && price > 0 ? price : 0,
+    goodsName: String(input.goodsName ?? '').trim() || 'AI 调用（每次）',
+    payBeforeMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : 10,
+    models: Array.isArray(input.models) ? input.models.filter((m): m is string => typeof m === 'string' && m.length > 0) : [],
+    ...(input.resourceId ? { resourceId: String(input.resourceId).trim() } : {}),
+  };
+}
+
 /** 深合并：数组与标量整体替换，对象递归合并 */
 export function deepMerge<T>(base: T, patch: unknown): T {
   if (patch === undefined || patch === null) return base;
@@ -218,6 +266,7 @@ export function loadConfigDetailed(options: LoadConfigOptions = {}): LoadConfigR
   }
 
   config = applyEnvOverrides(config, env, options.override);
+  config.business = normalizeBusiness(config.business);
   if (!options.lenientEnv) validateConfig(config);
   if (!config.lossReduction.meter.hashSalt) {
     config.lossReduction.meter.hashSalt = env['RELAY_HASH_SALT'] ?? sha256Hex(`salt:${abs}`).slice(0, 32);
@@ -421,6 +470,66 @@ export function inspectConfig(config: RelayConfig): ConfigIssue[] {
     if (noCap.length > 0) {
       push('warn', `档位阶梯 ${alias} 里 ${noCap.join(', ')} 没有声明能力（tools/contextWindow）；带工具调用的请求切过去可能直接失败，建议在 modelCapabilities 里补上`);
     }
+  }
+
+  const biz = config.business;
+  if (biz?.enabled) {
+    if (biz.packs.length === 0) {
+      push('warn', 'business.enabled 但未配置 packs：将使用内置示例套餐（chat-100 / chat-500 / image-20）');
+    }
+    const seenPack = new Set<string>();
+    for (const pack of biz.packs) {
+      if (seenPack.has(pack.id)) push('error', `套餐 id 重复: ${pack.id}`);
+      seenPack.add(pack.id);
+      if (!pack.id || !/^[a-zA-Z0-9_-]{1,40}$/.test(pack.id)) push('error', `套餐 id 非法: ${String(pack.id)}（只允许字母/数字/下划线/连字符）`);
+      if (!Number.isInteger(pack.uses) || pack.uses <= 0) push('error', `套餐 ${pack.id} 的 uses 必须是正整数`);
+      if (!(pack.priceCny > 0)) push('error', `套餐 ${pack.id} 的 priceCny 必须大于 0`);
+      if (!(pack.validDays > 0)) push('error', `套餐 ${pack.id} 的 validDays 必须大于 0`);
+      if (!Array.isArray(pack.models) || pack.models.length === 0) push('error', `套餐 ${pack.id} 至少要声明一个可用模型`);
+      if (pack.costCapCny !== undefined && pack.costCapCny <= 0) push('error', `套餐 ${pack.id} 的 costCapCny 必须大于 0`);
+      for (const m of pack.models ?? []) {
+        if (!known.has(m)) push('warn', `套餐 ${pack.id} 的模型 ${m} 没有任何上游声明支持`);
+      }
+    }
+    if (biz.payments.provider === 'alipay') {
+      const a = biz.payments.alipay;
+      if (!a) push('error', 'business.payments.provider=alipay 但缺少 alipay 配置');
+      else {
+        if (!a.appId) push('error', 'alipay.appId 为空');
+        if (!a.privateKey) push('error', 'alipay.privateKey 为空');
+        if (!a.alipayPublicKey) push('error', 'alipay.alipayPublicKey 为空');
+        if (!a.notifyUrl) push('error', 'alipay.notifyUrl 为空');
+        if (!/^https?:\/\//.test(a.gateway ?? '')) push('error', 'alipay.gateway 必须是 http(s) 绝对地址');
+      }
+    }
+    const mp = biz.machinePay;
+    if (mp?.enabled) {
+      if (!(mp.priceCny > 0)) push('error', 'business.machinePay.priceCny 必须大于 0');
+      else if (mp.priceCny > 50) push('error', 'business.machinePay.priceCny 不能超过 50（支付宝按量付费硬限制）');
+      const minutes = mp.payBeforeMinutes ?? 10;
+      if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 720) {
+        push('error', 'business.machinePay.payBeforeMinutes 需在 1~720 分钟之间');
+      }
+      if (mp.models.length === 0) push('error', 'business.machinePay.models 至少要声明一个可用模型');
+      for (const m of mp.models) {
+        if (!known.has(m)) push('warn', `machinePay 的模型 ${m} 没有任何上游声明支持`);
+      }
+      if (mp.provider === 'alipay') {
+        if (!mp.serviceId) push('error', 'business.machinePay.provider=alipay 时 serviceId 不能为空');
+        const a = biz.payments.alipay;
+        if (!a) push('error', 'business.machinePay.provider=alipay 但缺少 business.payments.alipay 配置');
+        else {
+          if (!a.appId) push('error', 'alipay.appId 为空');
+          if (!a.privateKey) push('error', 'alipay.privateKey 为空');
+          if (!a.alipayPublicKey) push('error', 'alipay.alipayPublicKey 为空');
+          if (!/^https?:\/\//.test(a.gateway ?? '')) push('error', 'alipay.gateway 必须是 http(s) 绝对地址');
+        }
+      } else if (!mp.serviceId) {
+        push('warn', 'business.machinePay 未配置 serviceId：mock 演示将使用 mock-service');
+      }
+    }
+  } else if (biz?.machinePay?.enabled) {
+    push('error', 'business.machinePay.enabled=true 但 business.enabled=false：/agent 不会挂载');
   }
 
   if (config.storage.driver === 'sqlite' && config.storage.path === ':memory:') {

@@ -39,7 +39,7 @@ providers:
     protocol: openai
     baseUrl: http://127.0.0.1:8899/v1
     apiKey: "mock-key"
-    models: [mock-small, mock-large, mock-429, mock-500, mock-401, mock-404, mock-400, mock-502, mock-503, mock-filter, mock-context, mock-balance]
+    models: [mock-small, mock-large, mock-image, mock-429, mock-500, mock-401, mock-404, mock-400, mock-502, mock-503, mock-filter, mock-context, mock-balance]
     weight: 1
     priority: 1
     tags: [local, cheap, unstable]
@@ -47,12 +47,106 @@ providers:
     # 真实上游不需要这些；这里声明它们只是为了让 P2 预检放行请求，
     # 从而端到端演示 P3 失败归因与自动故障转移。
     cost: { inputPerMTok: 0.2, outputPerMTok: 0.6 }
+  # 图片生成上游（示例，默认禁用）：只服务 POST /v1/images/generations。
+  # 图片按"张"计价：在 cost / modelCosts 里写 perImageCny（元/张），token 单价对图片不生效。
+  # 计费口径 = 响应 data 数组的实际条数；额度闸（quotaCny）与 402 走同一套。
+  - id: dashscope-images
+    label: 通义万相（图片生成示例）
+    protocol: openai
+    baseUrl: https://dashscope.aliyuncs.com/compatible-mode/v1
+    apiKey: "{ENV:DASHSCOPE_API_KEY:-}"
+    models: [wanx2.1-t2i-turbo]
+    disabled: true
+    weight: 1
+    priority: 10
+    tags: [cn, image]
+    modelCosts:
+      # 0.14 是示例价，上线前按厂商价目表核对
+      wanx2.1-t2i-turbo: { inputPerMTok: 0, outputPerMTok: 0, perImageCny: 0.14 }
 
 modelAliases:
   gpt-4o-mini: mock-small
   default: deepseek-chat
 
 defaultProvider: deepseek
+
+# ---------------------------------------------------------------------------
+# 扫码次数包（PAYATHON 2026 演示业务层）
+#
+# 商家买「次数包」→ 系统出码/二维码 → 顾客扫码（/s/<code>）直接用 AI。
+# 计次口径：一次**成功**调用扣 1 次（失败/被拦截不计）；图片调用同样计 1 次。
+# 生成码时只落 keyId，relay key 由服务端确定性派生，不入库、不出页面。
+# 开启后入口：商家台 /biz（数据接口要 X-Admin-Token）、顾客页 /s/:code。
+# ---------------------------------------------------------------------------
+business:
+  enabled: false
+  # 打印在二维码里的对外地址；不填则用请求的 Host 头（本机演示会被手机扫成 127.0.0.1）
+  publicBaseUrl: ""
+  merchantName: 外卖 AI 示范商户
+  # 顾客会话 Cookie 有效期（小时）
+  sessionTtlHours: 12
+  # 每把码 key 的成本止损额度 = 套餐单价 × 该比例（元）。次数闸门在业务层，这是毛利兜底。
+  costCapRatio: 0.9
+  packs:
+    # 价格均为示例价，上线前按实际定价改
+    - id: chat-100
+      name: 标准对话 100 次
+      uses: 100
+      priceCny: 9.9
+      models: [mock-small]
+      validDays: 90
+      description: 顾客扫码即用，含 AI 对话
+    - id: chat-500
+      name: 标准对话 500 次
+      uses: 500
+      priceCny: 39.9
+      models: [mock-small]
+      validDays: 180
+      description: 适合桌贴长期使用，单次更便宜
+    - id: image-20
+      name: AI 画图 20 张
+      uses: 20
+      priceCny: 19.9
+      models: [mock-image]
+      validDays: 90
+      description: 顾客扫码生成图片，每张计 1 次
+    # 外卖单码：一张外卖单贴一个码。商家在商家台输入平台订单号，系统从池子里
+    # 取一个码并打印 58mm 标签；同一订单号重复录入返回原码，不会重复消耗。
+    - id: slip-5
+      name: 外卖单码（每单 5 次）
+      uses: 5
+      priceCny: 0.49
+      models: [mock-small]
+      validDays: 30
+      description: 一单一个码，贴在餐袋上；适合把外卖订单变成顾客的下一次复购
+  payments:
+    # mock = 本地演示收银台（/pay/<订单号>），完整闭环无需任何商户资质
+    # alipay = 当面付预下单 alipay.trade.precreate + 异步通知（RSA2）
+    provider: mock
+    # alipay:
+    #   appId: "{ENV:ALIPAY_APP_ID}"
+    #   privateKey: "{ENV:ALIPAY_APP_PRIVATE_KEY}"
+    #   alipayPublicKey: "{ENV:ALIPAY_PUBLIC_KEY}"
+    #   gateway: https://openapi-sandbox.dl.alipaydev.com/gateway.do
+    #   notifyUrl: https://你的域名/biz/api/alipay/notify
+  # AI 按量付费（支付宝 Machine Pay / HTTP 402）：给「Agent 直接调你的接口」用的
+  # 独立入口。与上面的次数包互不相干——次数包卖给商家，按量付费卖给会写代码的调用方。
+  machinePay:
+    enabled: false
+    # mock = 本地演示支付页（/agent/mock-pay），无需商户资质即可跑通 402 全链路
+    # alipay = 支付宝 AI 按量付费（预下单 + 凭证验证，复用上面 payments.alipay 的密钥）
+    provider: mock
+    # 支付宝给商户分配的按量付费服务标识（注册后由支付宝侧提供）
+    serviceId: API-DEMO
+    # 单次调用价格（元），支付宝硬上限 50 元
+    priceCny: 0.01
+    goodsName: AI 调用（每次）
+    # 支付截止时间（分钟，1..720）；支付宝要求不超过 12 小时
+    payBeforeMinutes: 10
+    # 允许通过该入口调用的模型；请求里写别的模型会被替换成第一个
+    models: [mock-small]
+    # 可选：支付宝侧的资源标识，配置后凭证里的 resource_id 必须一致
+    # resourceId: out_res_id_demo
 
 clients:
   - id: demo-free

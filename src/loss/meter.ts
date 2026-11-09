@@ -22,7 +22,7 @@ import type {
   TierId,
   UsageBreakdown,
 } from '../core/types.js';
-import { condenseErrorText, round, safeJsonParse } from '../util/index.js';
+import { condenseErrorText, isImageEndpointPath, round, safeJsonParse } from '../util/index.js';
 import type { Store, DimStats, MeterDimension } from '../store/index.js';
 
 /** 内存回落路径用的维度取键 */
@@ -107,6 +107,16 @@ export function computeCost(usage: UsageBreakdown | undefined, cost: ProviderCos
     return round(((usage.totalTokens ?? 0) / 1_000_000) * cost.inputPerMTok, 8);
   }
   return round(inputCost + outputCost, 8);
+}
+
+/**
+ * 图片按张计价（人民币元）。返回 undefined 表示"该上游没配按张价"，
+ * 调用方应回落到上游自报的 token usage（gpt-image-1 这类会回 usage）。
+ */
+export function computeImageCost(images: number, cost: ProviderCost | undefined): number | undefined {
+  const per = cost?.perImageCny;
+  if (per === undefined || per <= 0 || images <= 0) return undefined;
+  return round(images * per, 8);
 }
 
 /* ------------------------------------------------------------------ *
@@ -319,7 +329,13 @@ export class Meter {
        *
        * 只在"确实产出了内容"时才报（bytesOut>0），避免把空响应也算成异常。
        */
-      if (ctx.outcome === 'success' && (rec.totalTokens ?? 0) === 0 && (ctx.bytesOut ?? 0) > 0) {
+      if (
+        ctx.outcome === 'success' &&
+        (rec.totalTokens ?? 0) === 0 &&
+        (ctx.bytesOut ?? 0) > 0 &&
+        // 图片按张计费：token 恒为 0 是正常的，不是"静默少记"
+        !isImageEndpointPath(ctx.path)
+      ) {
         this.zeroTokenCount++;
         this.deps.store.logEvent('warn', 'meter.zero_token', {
           requestId: ctx.requestId,

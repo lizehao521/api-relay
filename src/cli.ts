@@ -290,7 +290,10 @@ function cmdStarter(opts: CliOptions): number {
 /**
  * 这个网关接不了的模型：它们走的不是本网关已实现的端点（或语义/计费完全不同），
  * 拉进配置只会让客户调用失败。本网关实现的是 chat/completions、completions、
- * embeddings、responses、messages —— 凡是音频/图像/视频/重排/审核类都不在其中。
+ * embeddings、responses、messages、images/generations —— 凡是音频/视频/重排/审核类都不在其中。
+ *
+ * 注意：图片生成已支持（/v1/images/generations，按张计费），但图片模型混进 models
+ * 后也能被 chat 请求选中；默认仍不自动拉取，需要时加 --all-models。
  *
  * 注意两个曾经漏掉的写法：`asr`（语音识别）和 `reranker`。
  * 前者让 MiMo 的 `mimo-v2.5-asr` 被判成对话模型；后者让最常见的 `bge-reranker-v2`
@@ -352,7 +355,7 @@ async function cmdPullModels(opts: CliOptions): Promise<number> {
     process.stdout.write(`  可作对话模型  ${chatLike.length} 个: ${chatLike.join(', ') || '（无）'}\n`);
     if (excluded.length > 0 && !opts.allModels) {
       process.stdout.write(`  已排除非对话  ${excluded.length} 个: ${excluded.join(', ')}\n`);
-      process.stdout.write(`  （视频/图片等端点语义与计费不同，拉进配置只会让客户调用失败；要全收加 --all-models）\n`);
+      process.stdout.write(`  （图片模型只服务 /v1/images/generations；视频/音频/重排不代理。要全收加 --all-models）\n`);
     }
 
     const before = provider.models;
@@ -466,6 +469,28 @@ function cmdCheck(opts: CliOptions): number {
       tags: p.tags ?? [],
     })),
     clients: config.clients.map((c) => ({ id: c.id, tier: c.tier, enabled: c.enabled })),
+    business: config.business
+      ? {
+          enabled: config.business.enabled,
+          merchantName: config.business.merchantName ?? '',
+          packs: config.business.packs.map((p) => ({ id: p.id, uses: p.uses, priceCny: p.priceCny, models: p.models })),
+          paymentProvider: config.business.payments.provider,
+          alipayCredentialsConfigured: Boolean(
+            config.business.payments.alipay?.appId &&
+              config.business.payments.alipay.privateKey &&
+              config.business.payments.alipay.alipayPublicKey,
+          ),
+          machinePay: config.business.machinePay
+            ? {
+                enabled: config.business.machinePay.enabled,
+                provider: config.business.machinePay.provider,
+                serviceId: config.business.machinePay.serviceId,
+                priceCny: config.business.machinePay.priceCny,
+                models: config.business.machinePay.models,
+              }
+            : null,
+        }
+      : null,
     tiers: Object.fromEntries(
       Object.entries(config.tiers).map(([k, v]) => [k, { precheck: v.precheck, attribution: v.attribution, rpm: v.rpm, quota: v.periodQuotaTokens }]),
     ),
@@ -500,7 +525,9 @@ function cmdCheck(opts: CliOptions): number {
   for (const p of config.providers) {
     const pid = p.id ?? '(未命名)';
     const proto = p.protocol ?? 'openai';
-    line(`  ${pid.padEnd(14)} ${proto.padEnd(9)} 模型 ${String((p.models ?? []).length).padStart(3)} 个  cost=${p.cost ? 'yes' : 'no '}  tags=${(p.tags ?? []).join(',') || '-'}`);
+    // 型号级价目（含图片的 perImageCny）也算"配了价"，否则图片上游会被误报 cost=no
+    const priced = p.cost || Object.keys(p.modelCosts ?? {}).length > 0;
+    line(`  ${pid.padEnd(14)} ${proto.padEnd(9)} 模型 ${String((p.models ?? []).length).padStart(3)} 个  cost=${priced ? 'yes' : 'no '}  tags=${(p.tags ?? []).join(',') || '-'}`);
   }
   if (config.providers.length === 0) line('  （无）');
   line('');
@@ -514,6 +541,38 @@ function cmdCheck(opts: CliOptions): number {
     line(`  ${cid.padEnd(16)} ${String(tier).padEnd(9)} precheck=${t?.precheck} attribution=${t?.attribution} rpm=${t?.rpm ?? '∞'}`);
   }
   if (config.clients.length === 0) line('  （无：网关将拒绝所有请求）');
+  line('');
+  line('-- 扫码次数包 --');
+  if (!config.business?.enabled) {
+    line('  未启用（business.enabled=false，/biz、/s/:code 不挂载）');
+  } else {
+    const biz = config.business;
+    const alipayOk = Boolean(biz.payments.alipay?.appId && biz.payments.alipay?.privateKey && biz.payments.alipay?.alipayPublicKey);
+    line(`  商户: ${biz.merchantName ?? '-'}  会话 ${biz.sessionTtlHours}h  成本上限比 ${biz.costCapRatio}`);
+    line(`  支付: ${biz.payments.provider}${biz.payments.provider === 'alipay' ? `（凭据 ${alipayOk ? '已配置' : '缺失'}，只从环境变量读取）` : '（本地演示，无需凭据）'}`);
+    for (const p of biz.packs) {
+      line(`  ${p.id.padEnd(14)} ${String(p.uses).padStart(4)} 次 / ¥${p.priceCny.toFixed(2).padStart(6)}  模型 ${p.models.join(',')}`);
+    }
+    if (biz.packs.length === 0) line('  （无套餐：使用内置 3 个示例包）');
+    if (biz.payments.provider === 'alipay' && !alipayOk) {
+      line('  ! 支付宝凭据缺失：启动时会回退到 mock 支付（见启动日志 biz.payment）');
+    }
+    const mp = biz.machinePay;
+    line('');
+    line('-- AI 按量付费（HTTP 402）--');
+    if (!mp?.enabled) {
+      line('  未启用（business.machinePay.enabled=false，/agent/* 不挂载）');
+    } else {
+      line(`  入口: POST /agent/v1/chat/completions   ${mp.provider}  单次 ¥${mp.priceCny.toFixed(2)}  service_id=${mp.serviceId}`);
+      line(`  模型: ${mp.models.join(',') || '（未配置，入口将回 503）'}   支付截止 ${mp.payBeforeMinutes ?? 10} 分钟`);
+      if (mp.provider === 'alipay' && !alipayOk) {
+        line('  ✗ 按量付费选择 alipay 但缺少 APPID/私钥/公钥，配置校验会拒绝启动');
+      }
+      if (mp.provider === 'mock') {
+        line('  ! mock 模式：402 演示链接可免费换凭证，仅限本地评审，上线前切 alipay');
+      }
+    }
+  }
   line('');
   line('-- 降损层 --');
   line(`  预检 P2:  ${config.lossReduction.precheck.enabled ? 'on' : 'off'}（onBlock=${config.lossReduction.precheck.onBlock}, 预算 ${config.lossReduction.precheck.budgetUs}µs）`);

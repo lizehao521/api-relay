@@ -92,6 +92,13 @@ export interface ProviderCost {
   outputPerMTok: number;
   /** 命中 prompt cache 的输入单价（可选） */
   cachedInputPerMTok?: number;
+  /**
+   * 图片生成单价（人民币元 / 张），仅 `/v1/images/generations` 使用。
+   *
+   * 图片端点不按 token 计价：上游按"产出张数"收费（多数兼容实现也不回 usage）。
+   * 配了它就按**响应里实际返回的 data 条数**计费，配了不用 token 价。
+   */
+  perImageCny?: number;
 }
 
 export interface ProviderConfig {
@@ -495,6 +502,8 @@ export interface UsageBreakdown {
   cachedPromptTokens?: number;
   /** 推理模型单独统计的思考 token（Agnes: completion_tokens_details.reasoning_tokens） */
   reasoningTokens?: number;
+  /** 图片生成张数（仅 /v1/images/generations）——按张计费的用量口径 */
+  images?: number;
   /** 计价结果（人民币元）—— **实付**口径 */
   costCny?: number;
   /** 同一份用量按**刊例价**折算的人民币金额（牌面价，用于对外报价对比） */
@@ -802,12 +811,91 @@ export interface AgentConfig {
   kbId?: string;
 }
 
+/** 扫码次数包：商家整包购买，顾客扫码消耗次数 */
+export interface PackConfig {
+  id: string;
+  name: string;
+  /** 本包含多少次**成功**调用；图片调用同样计 1 次 */
+  uses: number;
+  /** 售价（人民币元），示例价，运营自行定价 */
+  priceCny: number;
+  /** 该包可用的模型（同时作为 relay key 的白名单） */
+  models: string[];
+  /** 有效期（天）：从支付成功起算 */
+  validDays: number;
+  /** 毛利止损：该包 key 的按钱额度上限（元）。缺省 = priceCny × business.costCapRatio */
+  costCapCny?: number;
+  description?: string;
+}
+
+export interface AlipayConfig {
+  appId: string;
+  /** 应用私钥（PKCS#1 或 PKCS#8 的 Base64 正文，不带 PEM 头） */
+  privateKey: string;
+  /** 支付宝公钥（Base64 正文） */
+  alipayPublicKey: string;
+  /** 网关地址。沙箱：https://openapi-sandbox.dl.alipaydev.com/gateway.do */
+  gateway?: string;
+  notifyUrl: string;
+  sellerId?: string;
+}
+
+export interface BusinessPaymentConfig {
+  /** mock = 本地收银台（演示/测试）；alipay = 当面付预下单 + 异步通知 */
+  provider: 'mock' | 'alipay';
+  alipay?: AlipayConfig;
+}
+
+/**
+ * AI 按量付费（支付宝 Machine Pay / HTTP 402）。
+ *
+ * 与次数包互补：次数包是商家先充值再发码，这里让**调用方 Agent** 按次现付。
+ * 支付凭证由支付宝预下单 + verify 接口验证；本地无密钥时可用 mock 跑通整条链路。
+ */
+export interface MachinePayConfig {
+  enabled: boolean;
+  /** mock = 本地演示（不联网）；alipay = 调支付宝按量付费接口 */
+  provider: 'mock' | 'alipay';
+  /** 按量付费注册分配的服务 ID（alipay 必填；mock 可留空） */
+  serviceId: string;
+  /** 每次成功调用收费（元）。支付宝硬限制 ≤ 50 */
+  priceCny: number;
+  /** 账单商品名 */
+  goodsName?: string;
+  /** 预下单支付截止（分钟），默认 10，上限 720（支付宝限制 12h） */
+  payBeforeMinutes?: number;
+  /** 这个入口允许调用的模型；必填，避免按次入口被拿去跑高价模型 */
+  models: string[];
+  /** 支付宝侧若为该服务固定了 resource_id，填这里做一致性校验 */
+  resourceId?: string;
+}
+
+export interface BusinessConfig {
+  enabled: boolean;
+  /** 二维码里写死的对外基址（如 https://ai.example.com）。缺省按请求 Host 推导 */
+  publicBaseUrl?: string;
+  /** 业务库路径。缺省与度量库同目录的 biz.db；:memory: 时走内存实现 */
+  storagePath?: string;
+  /** 顾客会话有效期（小时），默认 12 */
+  sessionTtlHours: number;
+  /** 毛利止损比例：key 的按钱额度 = 包价 × 该比例，默认 0.9 */
+  costCapRatio: number;
+  /** 商家展示名（控制台默认值） */
+  merchantName?: string;
+  packs: PackConfig[];
+  payments: BusinessPaymentConfig;
+  /** AI 按量付费（402）。缺省 = 不开放 /agent 入口 */
+  machinePay?: MachinePayConfig;
+}
+
 export interface RelayConfig {
   server: ServerConfig;
   storage: {
     driver: 'sqlite' | 'memory';
     path: string;
   };
+  /** 扫码次数包业务层。缺省 = 未启用 */
+  business?: BusinessConfig;
   /** 知识库（垂直 Agent 能力）。缺省 / path 为空 = 未启用，网关其余功能不受影响 */
   kb?: KbConfig;
   /** 内部 Agent 系统（自托管运维/迭代决策环）。缺省 = 未启用 */

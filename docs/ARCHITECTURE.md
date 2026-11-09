@@ -49,6 +49,7 @@
 | `gateway/` | 1,889 | 引擎管道、鉴权/限流/额度、HTTP 传输 | 引擎不依赖 `node:http` |
 | `store/` | 923 | 度量持久化（SQLite/内存双实现）、维度聚合、key 元数据 | 主路径只入内存队列，绝不阻塞 |
 | `admin/` | 697 | 管理 JSON API + 内嵌单页看板 | 只读展示 + 少量运营动作 |
+| `biz/` | 2,299 | 扫码次数包：订单/核销码/二维码/双端页面/支付适配器 | 不代表用户写业务逻辑，只做会话与次数闸门 |
 | `mock/` | 383 | 可注入故障的 OpenAI 兼容 mock 上游 | 仅供开发/测试 |
 
 **关键切法**：`Engine` 与 `RelayServer` 之间用 `EngineResult`（JSON 或 Stream）解耦。
@@ -132,9 +133,15 @@ Engine.handle()
 | 轨迹 | 内存环 + `trace` 表 | 保留期 | 步骤摘要（含上游错误 message 片段） |
 | 熔断状态 | `breaker_state` 表 | 长期 | 否 |
 | 限流计数 | 内存（每实例） | 分钟级 | 否 |
+| 业务订单/核销码 | `biz.db` 的 `biz_order` / `biz_code` 表 | 长期（码可撤销/过期） | 否（只有商户名、套餐快照、次数） |
+| 顾客会话 | 签名 Cookie（不落库） | `sessionTtlHours` | 否（仅码 + `sid` + 过期时间） |
 
 **控制面 / 数据面分离**：数据面（转发）不依赖数据库；数据库故障 → 自动降级为纯内存并记 `degradedEvents`，
 服务继续可用但重启后丢历史。这是刻意的：**中转站不能因为看板数据库挂了就不能转发**。
+
+**业务库独立**：`biz.db` 与 `relay.db` 分开，避免高频 meter 写入和订单写事务争锁；
+业务库故障只影响发码/核销，不影响 `/v1/*` 转发。业务层调用模型仍走既有 `Engine.handle()` 全链路，
+只在其前面加「会话 → 次数预留 → 成功扣次」这一层闸门。
 
 ---
 
@@ -192,6 +199,7 @@ Engine.handle()
 | 分布式限流 | 实现一个新的 `Store`（Redis），`incrRate`/`quotaSnapshot`/`record` | 接口已隔离；主路径要保证 fail-open |
 | 新管理接口 | `admin/api.ts` 的 switch | 必须走 `authorize()`；写操作必须 `store.logEvent()` 留痕 |
 | 新面板页签 | `admin/dashboard.ts` 的 `tabs` 数组 + `loadTab` 分支 | 只读页会参与 15s 自动刷新，表单页（keys/config）刻意不自动刷新 |
+| 新业务页 / 新支付渠道 | `biz/pages.ts`、`biz/payment.ts` 的 `PaymentProvider` 实现 | 顾客侧只许读本码数据；支付回调必须验签 + 金额校验 + 幂等 |
 | key 的新字段 | `ClientKeyConfig` → `KeyRecord` → `key_meta` 表 → `KeyView` | 四处都要改；面板创建的 key 必须能从 DB 恢复（只靠哈希） |
 | 看板换皮 | 放 `overrides/dashboard.html` | `loadCustomDashboard()` 会优先读它 |
 

@@ -19,6 +19,7 @@ import { RelayServer } from './gateway/server.js';
 import { AdminApi } from './admin/api.js';
 import { KbStore } from './kb/store.js';
 import { AgentOps } from './agent/ops.js';
+import { BizService } from './biz/index.js';
 
 export interface App {
   config: RelayConfig;
@@ -28,6 +29,8 @@ export interface App {
   kb?: KbStore | undefined;
   /** 运营 Agent（平台规则 Agent；未启用时 undefined） */
   agentOps?: AgentOps | undefined;
+  /** 扫码次数包业务（business.enabled 时才有） */
+  biz?: BizService | undefined;
   pool: ProviderPool;
   router: Router;
   keys: KeyRegistry;
@@ -117,6 +120,13 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
     });
   }
 
+  /* ---------- 扫码次数包业务（独立 biz.db；未启用则不建） ---------- */
+  let biz: BizService | undefined;
+  if (config.business?.enabled) {
+    biz = new BizService({ config, business: config.business, logger, engine, keys });
+    await biz.init();
+  }
+
   const admin: AdminApi = new AdminApi({
     config,
     logger,
@@ -131,7 +141,7 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
     agentOps,
     serverStats: () => server.stats,
   });
-  const server = new RelayServer({ config, engine, admin, logger, kb, keys });
+  const server = new RelayServer({ config, engine, admin, logger, kb, keys, biz });
 
   return {
     config,
@@ -139,6 +149,7 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
     store,
     kb,
     agentOps,
+    biz,
     pool,
     router,
     keys,
@@ -172,6 +183,7 @@ export async function createApp(config: RelayConfig, baseLogger?: Logger): Promi
       await server.close(config.server.shutdownGraceMs);
       await store.close();
       await kb?.close();
+      await biz?.close();
       // 关掉上游 HTTP/2 会话（平时已 unref，不拦退出；这里显式收尾更干净）
       closeH2Sessions();
       logger.info('relay.shutdown_complete', {});
@@ -202,6 +214,7 @@ export function memoryConfig(overrides: Partial<RelayConfig> = {}): RelayConfig 
       ...(overrides.server ?? {}),
     },
     storage: { driver: 'memory', path: ':memory:', ...(overrides.storage ?? {}) },
+    ...(overrides.business ? { business: overrides.business } : {}),
     lossReduction: overrides.lossReduction ?? {
       precheck: { enabled: true, onBlock: 'reject', budgetUs: 3_000, maxMessages: 512, maxTools: 128, maxTokensCeiling: 1_000_000, dangerousCommandPatterns: ['rm\\s+-rf\\s+/(?!\\w)'] },
       attribution: {

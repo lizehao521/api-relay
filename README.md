@@ -11,9 +11,8 @@
 | 语言 | TypeScript 5.6（strict），编译到 ESM |
 | **运行时依赖** | **0 个**（仅 `node:http` / `node:crypto` / `node:sqlite` 等内置模块） |
 | 开发依赖 | typescript、@types/node、tsx |
-| 源码规模 | 77 个文件 / 27,072 行（不含测试） |
-| 测试规模 | `node --test` 实测 **300 项通过 / 0 失败** |
-| PAYATHON 2026 | 支付宝 AI 付（Machine Pay）按量付费：HTTP 402 + `amtPaymentLink` + `Payment-Proof` |
+| 源码规模 | 42 个文件 / 19,966 行（不含测试） |
+| 测试规模 | `node --test` 实测 **269 项通过 / 0 失败** |
 | 存储 | SQLite（WAL，控制面） / 内存（可切换） |
 | 核心模块 | `loss/` 降损层 2,073 行 · `gateway/` 网关 3,383 行 · `upstream/` 上游池 · `store/` 度量库 |
 
@@ -99,34 +98,8 @@ node dist/cli.js starter --vendor mock --out starter.yaml        # 本地 mock�
 
 > Agnes 的 `/models` 是**公开接口**（带任意 Authorization 头即返回 200，不校验），
 > 所以**不能用它来判断密钥是否有效**——必须真的发一次 `/chat/completions`。
-> 同一账号下还有 `agnes-video-*` / `agnes-image-*`，视频端点不在本网关覆盖范围内；
-> 图片生成走 `/v1/images/generations`（按张计费，见下），起步配置默认只列 chat 模型。
-
-### 图片生成（`/v1/images/generations`，按张计费）
-
-图片和文字走同一个网关、同一把 key、同一套额度闸，只是计费单位从 token 换成"张"：
-配置里给图片模型写 `perImageCny`，按**上游响应 `data` 的实际条数**扣预算，
-预算用尽同样回 `402 quota_exhausted`。
-
-```yaml
-providers:
-  - id: dashscope-images
-    protocol: openai
-    baseUrl: https://dashscope.aliyuncs.com/compatible-mode/v1
-    apiKey: "{ENV:DASHSCOPE_API_KEY}"
-    models: [wanx2.1-t2i-turbo]
-    modelCosts:
-      # 示例价，上线前按厂商价目表核对
-      wanx2.1-t2i-turbo: { inputPerMTok: 0, outputPerMTok: 0, perImageCny: 0.14 }
-```
-
-```bash
-curl -s http://127.0.0.1:8787/v1/images/generations \
-  -H "Authorization: Bearer $RELAY_KEY" -H 'content-type: application/json' \
-  -d '{"model":"wanx2.1-t2i-turbo","prompt":"一只在窗台晒太阳的猫","n":2,"size":"1024x1024"}'
-```
-
-只代理**生成**（JSON 入、JSON 出）；`/v1/images/edits`（multipart 上传）与音频/视频端点不在覆盖范围内。
+> 同一账号下还有 `agnes-video-*` / `agnes-image-*`，那些端点语义与计费不同（视频按秒），
+> 不在本网关覆盖范围内，因此起步配置只列 chat 模型。
 
 > 模型名与价格会变。模板只保证**格式正确**，不保证**当下最优**——接好之后用
 > `GET /v1/models` 核实你账号实际可用的模型，再改 `models` 一行。
@@ -210,9 +183,8 @@ node dist/cli.js pull-models --config agnes-ladder.yaml            # 拉取并�
 node dist/cli.js pull-models --config agnes-ladder.yaml --dry-run  # 只看差异
 ```
 
-它会自动**排除视频/音频/重排等本网关不代理的模型**（图片生成已支持
-`/v1/images/generations`，但图片模型混进 `models` 后也会被 chat 请求选中，
-所以默认仍不自动拉取；需要时加 `--all-models`）：
+它会自动**排除视频/图片/向量等非对话模型**——那些端点语义与计费都不同，
+拉进配置只会让客户拿它们打 `chat/completions` 然后失败：
 
 ```
 【agnes】拉取 https://apihub.agnes-ai.com/v1/models
@@ -253,7 +225,7 @@ node dist/cli.js report      # 打印度量报告（P8）
 ## 5. 验证它真的在工作
 
 ```bash
-npm test                 # 单测数量以实际输出为准（当前 300 项）
+npm test                 # 单测数量以实际输出为准（当前 216 项）
 bash scripts/smoke.sh    # 30 项真实进程冒烟：流式、故障注入、限流、优雅退出、重启后度量
 ```
 
@@ -265,7 +237,7 @@ bash scripts/smoke.sh    # 30 项真实进程冒烟：流式、故障注入、�
 
 ### 6.1 是
 
-- **OpenAI 兼容网关**：`/v1/chat/completions`（含 SSE 流式）、`/v1/images/generations`（按张计费）、`/v1/embeddings`、`/v1/completions`、`/v1/models`。
+- **OpenAI 兼容网关**：`/v1/chat/completions`（含 SSE 流式）、`/v1/embeddings`、`/v1/completions`、`/v1/models`。
   客户端把 `base_url` 指过来就能用，不改一行业务代码。
 - **多上游聚合**：一个 key 聚合多上游；按优先级 / 成本 / 权重 / 延迟路由；可恢复错误自动故障转移；熔断与半开。
 - **多 key 池**：同一上游可挂多个 key，轮换分摊限流；被拒的 key 自动报废或短冷却，用户无感。
@@ -523,78 +495,6 @@ POST /admin/api/providers/toggle | providers/reset | loss-reduction/update
 （实测三态都是 `mimo-v2.5-pro`，客户端 200），Agent 问到的模型与回答语义完全一致 ——
 这正是"同模型才敢兜底"的原因。
 
-### 9.2 扫码次数包：商家买次数 → 发码 → 顾客扫码即用
-
-面向线下门店的另一种卖法：**不卖 token、不碰餐费**，商家按「次数包」预付，
-系统出二维码贴桌，顾客扫码直接用 AI，每成功一次扣一次。
-
-```
-商家 /biz 下单 → 支付（mock / 支付宝当面付）→ 自动出码 + 二维码 + 可打印小票
-顾客 /s/<code> 扫码 → 签名 Cookie 会话 → AI 对话 / 画图 → 成功一次扣一次
-次数用尽 → 402 续购提示；商家台可撤销码、看核销与营收
-```
-
-| 入口 | 说明 |
-|---|---|
-| `GET /biz` | 商家控制台（数据接口需 `X-Admin-Token`） |
-| `GET /s/:code` | 顾客 H5（免登录，凭码进店） |
-| `POST /biz/api/session` | 扫码换签名 Cookie 会话（HTTP Only） |
-| `GET /pay/:orderId` | mock 收银台（带 HMAC 链接令牌才可打开） |
-| `POST /biz/api/alipay/notify` | 支付宝异步通知（RSA2 验签 + 幂等） |
-| `GET /biz/qr/:code.svg` | 二维码 SVG（打印与屏幕同源） |
-| `GET /biz/print/:orderId` | 可打印小票（A4，一码一卡） |
-| `POST /biz/api/slips/bind` | 外卖平台单号换一个码（同单号幂等，不重复耗码） |
-| `GET /biz/label/:code` | 58 mm × 40 mm 热敏标签（单号 + 二维码，贴餐袋） |
-| `POST /biz/api/chat` / `/biz/api/image` | 顾客调用，转发既有 `/v1/*` 全链路 |
-
-配置见 `config/relay.example.yaml` 的 `business:` 段（默认 `enabled: false`）。
-`payments.provider: mock` 可在无任何商户资质时完整演示；`alipay` 的 APPID/私钥/公钥
-只从环境变量读，缺凭据启动时会回退 mock 并在日志写明。
-
-计数口径写死在业务层：**成功响应才计次，失败/被拦截不计**；图片请求强制 `n=1`（一张 = 一次）；
-一个码是一个共享池（桌贴场景可多人扫），有总量、有效期、可撤销；
-外卖场景按「一单一个码」绑定平台订单号，同一单号重复录入返回原码、不额外耗码；relay key 由服务端确定性派生、
-**不入库也不出页面**，另设 `quotaCny = 包价 × costCapRatio` 作为毛利硬止损。
-
-### 9.3 AI 按量付费：Agent 调一次、付一次（支付宝 Machine Pay / HTTP 402）
-
-次数包卖给商家，按量付费卖给**会写代码的调用方**——AI Agent、脚本、第三方应用。
-协议就三拍：没有凭证先给 `402` 和 `amtPaymentLink`，付完带 `Payment-Proof` 重试，验过才交付。
-
-```
-POST /agent/v1/chat/completions
-  │  无 Payment-Proof
-  ├─→ 402 Payment Required
-  │     amtPaymentLink: amtpp_...            ← 支付宝预下单号
-  │     { payment: { outTradeNo, amountCny, payBefore, ... } }
-  │  （mock 模式附带 mockPayUrl，本地点一下就能拿到真格式凭证）
-  │
-  │  用户/Agent 完成支付后，带 Payment-Proof 重试
-  └─→ verify → 金额/订单/交易号/resource_id 逐项对账 → 领租约 → 调引擎
-        ├─ 2xx   → 订单 consumed，交付结果
-        └─ 5xx   → 订单退回 paid，**同一张凭证可以重试**（失败不吞钱）
-```
-
-**这张表守的是「不重复交付、不吞钱」**：
-
-| 状态 | 含义 | 再带同一凭证 |
-|---|---|---|
-| `pending` | 已预下单，未支付 | 复用同一张待付单，不刷单 |
-| `paid` | 凭证验证通过，等待调用 | 领租约后执行 |
-| `processing` | 正在调用上游（租约 5 分钟） | 409 语义的 402 `payment_in_progress` |
-| `consumed` | 已成功交付 | 402 `payment_trade_used`，永不二次履约 |
-
-`trade_no` 在库里有 **部分唯一索引**（`WHERE trade_no IS NOT NULL`），同一笔支付宝交易
-最多落一张单；进程崩溃留下的 `processing` 超过租约后可被重新领取，不需要人工点按钮。
-
-配置见 `business.machinePay:`（默认关闭）。`provider: mock` 用本地 HMAC 钥匙扮演支付宝，
-链路完全一致，**无商户资质也能把 402 全流程跑给评委看**；`provider: alipay` 走
-`alipay.aipay.agent.payment.precreate` / `.verify`，密钥复用 `payments.alipay`，**响应必须验签**
-（按原始 JSON 子串验，重新序列化会破坏签名）——只信 HTTP 200 等于把「谁付了钱」交给一个可被替换的响应。
-
-按量付费的 relay key 同样是服务端派生、调用方不可见；它不带次数与金额配额，
-因为闸门已经在 402 链路里，**再叠一层 key 配额只会在付过钱之后误伤**。
-
 ---
 
 ## 10. 文档地图
@@ -604,7 +504,6 @@ POST /agent/v1/chat/completions
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 架构、模块边界、请求生命周期、扩展点、性能特征 |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | 设计契约与红线：零改写、fail-open、纯函数审查、归因通道、合规 |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | 部署、配置项全表、运维手册、容量与安全、故障排查 |
-| [`docs/payathon/`](docs/payathon/01-需求分析说明书.md) | PAYATHON 2026 交付文档 8 篇：需求/概要/详细/数据库/接口/原型/测试/部署 |
 | [`DECISIONS.md`](DECISIONS.md) | 决策记录（含 ADR-011 分两个系统的边界、ADR-012 起步只做单厂商） |
 | [`docs/research/01-竞品与生态矩阵.md`](docs/research/01-竞品与生态矩阵.md) | OneAPI / NewAPI / LiteLLM / Portkey / Helicone / OpenRouter 逐项对比（含源码行号证据） |
 | [`docs/research/02-上游协议与错误契约.md`](docs/research/02-上游协议与错误契约.md) | 实现者速用区：字段表、错误码映射、归因规则素材（21 个 URL 实证） |
@@ -615,7 +514,7 @@ POST /agent/v1/chat/completions
 
 ## 11. 当前状态与下一步
 
-**已完成（本仓库可运行、可测试）**：调研 → 架构 → 自研实现 → 300 单测 + 30 项冒烟 → 管理看板 → 运维文档。
+**已完成（本仓库可运行、可测试）**：调研 → 架构 → 自研实现 → 108 单测 + 30 项冒烟 → 管理看板 → 运维文档。
 
 **已知边界（诚实清单）**：
 

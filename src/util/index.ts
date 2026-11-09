@@ -110,16 +110,6 @@ export function round(n: number, digits = 4): number {
   return Math.round(n * f) / f;
 }
 
-/**
- * 图片生成端点：按"张"计量，不适用 token 口径。
- *
- * 单独成函数是因为引擎（计价）与度量层（零 token 守卫）都要判断它 ——
- * 后者若不排除图片，每一张图都会留下一条"成功但零 token"的误报警告。
- */
-export function isImageEndpointPath(path: string | undefined): boolean {
-  return typeof path === 'string' && path.replace(/\/+$/, '').endsWith('/images/generations');
-}
-
 /* ------------------------------------------------------------------ *
  * 时间
  * ------------------------------------------------------------------ */

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseYaml, interpolateTree, interpolateEnv, YamlError } from '../core/yaml.js';
-import { loadConfig, deepMerge, inspectConfig, defaultConfig, exampleConfigYaml, normalizeBusiness } from '../core/config.js';
+import { loadConfig, deepMerge, inspectConfig, defaultConfig, exampleConfigYaml } from '../core/config.js';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -178,72 +178,4 @@ test('inspectConfig: smartRouting 无成本数据时给出告警', () => {
   config.providers = [{ id: 'p', label: 'p', protocol: 'openai', baseUrl: 'https://x/v1', apiKey: 'k', models: ['m'] }];
   const issues = inspectConfig(config);
   assert.ok(issues.some((i) => i.level === 'warn' && i.message.includes('smartRouting')));
-});
-
-/* ------------------------------------------------------------------ *
- * 按量付费配置门禁
- * ------------------------------------------------------------------ */
-
-function bizConfig(overrides: Record<string, unknown> = {}): ReturnType<typeof defaultConfig> {
-  const config = defaultConfig();
-  config.providers = [{ id: 'p', label: 'p', protocol: 'openai', baseUrl: 'https://x/v1', apiKey: 'k', models: ['m'] }];
-  config.business = normalizeBusiness({
-    enabled: true,
-    sessionTtlHours: 12,
-    costCapRatio: 0.9,
-    packs: [],
-    payments: { provider: 'mock' },
-    machinePay: {
-      enabled: true,
-      provider: 'mock',
-      serviceId: 'API-TEST',
-      priceCny: 0.01,
-      models: ['m'],
-      ...overrides,
-    },
-  } as never);
-  return config;
-}
-
-test('inspectConfig: 按量付费越界配置必须报错，且不被静默夹紧', () => {
-  const config = bizConfig({ provider: 'alipay', serviceId: '', priceCny: 51, payBeforeMinutes: 1000, models: [] });
-  const errors = inspectConfig(config).filter((i) => i.level === 'error').map((i) => i.message);
-  assert.ok(errors.some((m) => m.includes('priceCny') && m.includes('50')), '价格上限');
-  assert.ok(errors.some((m) => m.includes('payBeforeMinutes') && m.includes('720')), '1000 分钟不能被夹成 720 后放行');
-  assert.ok(errors.some((m) => m.includes('models')), '空模型列表');
-  assert.ok(errors.some((m) => m.includes('serviceId')), 'alipay 缺 serviceId');
-  assert.ok(errors.some((m) => m.includes('business.payments.alipay')), 'alipay 缺凭据配置');
-});
-
-test('inspectConfig: machinePay 开着但 business 关闭必须报错', () => {
-  const config = bizConfig();
-  assert.ok(config.business);
-  config.business.enabled = false;
-  const errors = inspectConfig(config).filter((i) => i.level === 'error').map((i) => i.message);
-  assert.ok(errors.some((m) => m.includes('machinePay.enabled') && m.includes('business.enabled')));
-});
-
-test('normalizeBusiness: 按量付费缺省值与非法值口径', () => {
-  const biz = normalizeBusiness({
-    enabled: true,
-    sessionTtlHours: 12,
-    costCapRatio: 0.9,
-    packs: [],
-    payments: { provider: 'mock' },
-    machinePay: { enabled: true, provider: 'nope', serviceId: '  ', priceCny: -3, payBeforeMinutes: 0, models: ['m', 7, ''] },
-  } as never);
-  assert.ok(biz?.machinePay);
-  assert.equal(biz.machinePay.provider, 'mock');
-  assert.equal(biz.machinePay.serviceId, '');
-  assert.equal(biz.machinePay.priceCny, 0, '非法价格归 0，交由 inspectConfig 报错');
-  assert.equal(biz.machinePay.payBeforeMinutes, 10);
-  assert.equal(biz.machinePay.goodsName, 'AI 调用（每次）');
-  assert.deepEqual(biz.machinePay.models, ['m']);
-});
-
-test('inspectConfig: mock 模式缺 serviceId 只告警', () => {
-  const config = bizConfig({ serviceId: '' });
-  const issues = inspectConfig(config);
-  assert.ok(issues.some((i) => i.level === 'warn' && i.message.includes('mock-service')));
-  assert.equal(issues.filter((i) => i.level === 'error' && i.message.includes('machinePay')).length, 0);
 });

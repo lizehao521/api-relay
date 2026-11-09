@@ -24,11 +24,11 @@ import type {
   TierPolicy,
   UsageBreakdown,
 } from '../core/types.js';
-import { BoundedCache, backoffDelay, estimateJsonTokens, estimateTokensFromBytes, hmacHex, isImageEndpointPath, monotonicMs, monotonicUs, ownLookup, sha256Hex, truncate } from '../util/index.js';
+import { BoundedCache, backoffDelay, estimateJsonTokens, estimateTokensFromBytes, hmacHex, monotonicMs, monotonicUs, ownLookup, sha256Hex, truncate } from '../util/index.js';
 import { createClassifier, type Classifier } from '../loss/attribution.js';
 import { compileDangerousPatterns, precheck, violationReason, type ModelCatalog } from '../loss/precheck.js';
 import { computeFingerprint } from '../loss/fingerprint.js';
-import { computeCost, computeImageCost } from '../loss/meter.js';
+import { computeCost } from '../loss/meter.js';
 import { TraceBuilder, TraceStore } from '../loss/tracer.js';
 import { Meter } from '../loss/meter.js';
 import type { Store } from '../store/index.js';
@@ -410,12 +410,7 @@ export class Engine {
           // 流式必须自己注入 include_usage，否则上游不回 usage，P8 计量整段丢成 0
           //（2026-09-14 实测：375 个流式请求 prompt/completion/total 全是 0）。
           // 注入后上游多出来的那一帧由客户端转发层（dropUsageOnlyFrames）滤掉。
-          //
-          // 图片端点例外：OpenAI 的 images API 不接受 stream_options 字段，
-          // 注进去会被上游 400；图片按"张"计费，本来也不依赖 usage 帧。
-          const usagePlan = isImageEndpointPath(endpoint)
-            ? { body: rewrittenBody, injected: false }
-            : this.withStreamUsage(rewrittenBody, stream);
+          const usagePlan = this.withStreamUsage(rewrittenBody, stream);
           return {
             path: upstreamPath,
             model: decision.upstreamModel,
@@ -594,15 +589,7 @@ export class Engine {
           });
           ctx.ttfbMs = outcome.response.ttfbMs;
           ctx.httpStatus = outcome.response.status;
-          return this.buildStreamResult(
-            ctx,
-            trace,
-            auth,
-            outcome,
-            routed.decision,
-            release,
-            isImageEndpointPath(endpoint) ? this.requestedImageCount(body) : 0,
-          );
+          return this.buildStreamResult(ctx, trace, auth, outcome, routed.decision, release);
         }
 
         if (outcome.kind === 'buffered') {
@@ -618,14 +605,11 @@ export class Engine {
             bytes: outcome.bodyText.length,
           });
           ctx.ttfbMs = outcome.ttfbMs;
-          const providerCost = this.costFor(routed.entry.config, routed.decision.upstreamModel);
-          const providerListCost = this.listCostFor(routed.entry.config, routed.decision.upstreamModel);
-          ctx.usage = this.withCost(outcome.usage, providerCost, providerListCost);
-          if (isImageEndpointPath(endpoint)) {
-            // 图片按"响应里实际产出的张数"计费；上游没回 data 时退回请求的 n（不臆造）
-            const images = this.imageCountOf(finalBody) || this.requestedImageCount(body);
-            ctx.usage = this.withImageCost(ctx.usage, images, providerCost, providerListCost);
-          }
+          ctx.usage = this.withCost(
+            outcome.usage,
+            this.costFor(routed.entry.config, routed.decision.upstreamModel),
+            this.listCostFor(routed.entry.config, routed.decision.upstreamModel),
+          );
           ctx.bytesOut = Buffer.byteLength(finalBody, 'utf8');
           ctx.httpStatus = outcome.status;
           ctx.durationMs = Math.round(monotonicMs() - startedMono);
@@ -969,13 +953,12 @@ export class Engine {
     if (p.endsWith('/completions')) return '/v1/completions';
     if (p.endsWith('/responses')) return '/v1/responses';
     if (p.endsWith('/messages')) return '/v1/messages';
-    if (p.endsWith('/images/generations')) return '/v1/images/generations';
     return p;
   }
 
   private upstreamPath(endpoint: string, _upstreamModel: string): string {
     const p = endpoint.replace(/\/+$/, '');
-    const known = ['/chat/completions', '/embeddings', '/completions', '/responses', '/messages', '/images/generations', '/models'];
+    const known = ['/chat/completions', '/embeddings', '/completions', '/responses', '/messages', '/models'];
     for (const suffix of known) {
       if (p.endsWith(suffix)) return suffix;
     }
@@ -1097,44 +1080,6 @@ export class Engine {
     if (cost) out.costCny = computeCost(usage, cost);
     const listTable = listCost ?? cost;
     if (listTable) out.listCostCny = computeCost(usage, listTable);
-    return out;
-  }
-
-  /** 图片响应的产出张数：OpenAI 兼容形状是 data 数组；解析失败按 0（不臆造用量）。 */
-  private imageCountOf(bodyText: string): number {
-    try {
-      const parsed = JSON.parse(bodyText) as { data?: unknown };
-      return Array.isArray(parsed.data) ? parsed.data.length : 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  /** 请求里的 n（OpenAI 默认 1）。仅在响应没回 data 时作为计量兜底。 */
-  private requestedImageCount(body: Record<string, unknown>): number {
-    const n = body['n'];
-    return typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
-  }
-
-  /**
-   * 图片计费：配了 perImageCny 就按张扣预算（覆盖 token 计价），否则保留 withCost 的结果。
-   * 额度闸读的是 costCny，所以这里产出的数直接决定 402 什么时候响。
-   */
-  private withImageCost(
-    usage: UsageBreakdown | undefined,
-    images: number,
-    cost: ProviderCost | undefined,
-    listCost: ProviderCost | undefined,
-  ): UsageBreakdown | undefined {
-    if (images <= 0) return usage;
-    const out: UsageBreakdown = usage
-      ? { ...usage }
-      : { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-    out.images = images;
-    const paid = computeImageCost(images, cost);
-    if (paid !== undefined) out.costCny = paid;
-    const listPaid = computeImageCost(images, listCost ?? cost);
-    if (listPaid !== undefined) out.listCostCny = listPaid;
     return out;
   }
 
@@ -1370,7 +1315,6 @@ export class Engine {
     outcome: Extract<UpstreamOutcome, { kind: 'passthrough' }>,
     decision: RouteDecision,
     release: () => void,
-    requestedImages = 0,
   ): EngineStream {
     const passthrough = outcome.response;
     const headers: Record<string, string> = {
@@ -1468,19 +1412,6 @@ export class Engine {
         }
         if (transcript.toolCalls && transcript.toolCalls.length > 0) {
           ctx.isToolCalling = true;
-        }
-        if (requestedImages > 0) {
-          // 图片流式：SSE 帧不是 chat 形状（transcript 数不到），按请求的 n 计费；
-          // 客户端中途断开不计费（无法确认上游是否已出图）。
-          if (!info.aborted) {
-            const provider = this.deps.pool.get(decision.providerId)?.config;
-            ctx.usage = this.withImageCost(
-              ctx.usage,
-              requestedImages,
-              this.costFor(provider, decision.upstreamModel),
-              this.listCostFor(provider, decision.upstreamModel),
-            );
-          }
         }
         trace.step('stream', true, `符号态重建：chunk=${transcript.chunkCount} 内容=${transcript.contentChars}字 工具调用=${transcript.toolCalls?.length ?? 0} 畸形帧=${transcript.malformedFrames}`, {
           chunks: transcript.chunkCount,

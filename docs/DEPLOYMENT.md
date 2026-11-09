@@ -269,24 +269,7 @@ curl -s -X POST $BASE/v1/chat/completions \
 | `quotaOverride` | 覆盖分层默认额度（token/周期） |
 | `expiresAt` | 到期时间戳（ms） |
 
-### 3.7 business（扫码次数包，默认关闭）
-
-| 字段 | 默认 | 说明 |
-|---|---|---|
-| `enabled` | `false` | 打开后挂载 `/biz`、`/s/:code`、`/pay/:orderId`；关闭时这些路径 404，`/v1/*` 不受影响 |
-| `merchantName` | `-` | 商家展示名（控制台/顾客页） |
-| `publicBaseUrl` | 空 | 二维码里写死的对外基址。空则用请求 Host；本机演示手机扫到 `127.0.0.1` 属于预期限制 |
-| `storagePath` | 与度量库同目录 `biz.db` | 业务库（订单/码）；`:memory:` 走内存实现（重启丢单，仅测试） |
-| `sessionTtlHours` | `12` | 顾客签名 Cookie 有效期 |
-| `costCapRatio` | `0.9` | 每把码 key 的按钱止损额度 = 套餐单价 × 比例；次数闸门在业务层，这是毛利兜底 |
-| `packs[]` | 内置 3 个示例包 | `id / name / uses / priceCny / models / validDays / description`，`costCapCny` 可按包覆盖 |
-| `payments.provider` | `mock` | `mock` = 本地收银台（无需资质）；`alipay` = 当面付预下单 + 异步通知 |
-| `payments.alipay` | 无 | `appId / privateKey / alipayPublicKey / notifyUrl / gateway`，密钥只允许 `{ENV:...}` |
-
-`relay check` 会打印套餐与支付状态；`provider: alipay` 但凭据缺失时启动**回退 mock** 并在日志写明。
-业务库与度量库分离，备份时两者都要带上（见 §5）。
-
-### 3.8 环境变量（覆盖配置文件）
+### 3.7 环境变量（覆盖配置文件）
 
 | 变量 | 作用 |
 |---|---|
@@ -298,7 +281,6 @@ curl -s -X POST $BASE/v1/chat/completions \
 | `RELAY_TRUST_PROXY` | `1` 开启 |
 | `RELAY_PRECHECK_ENABLED` / `RELAY_ATTRIBUTION_ENABLED` / `RELAY_METER_ENABLED` / `RELAY_TRACE_ENABLED` | 降损层各模式的紧急开关 |
 | `RELAY_HASH_SALT` | HMAC 盐（多实例必须一致） |
-| `ALIPAY_APP_ID` / `ALIPAY_APP_PRIVATE_KEY` / `ALIPAY_PUBLIC_KEY` | 仅 `business.payments.provider=alipay` 时使用；配置里用 `{ENV:...}` 引用，日志只打印是否已配置 |
 | 各上游密钥 | 例如 `DEEPSEEK_API_KEY`、`SILICONFLOW_API_KEY`（名字由配置里的 `{ENV:...}` 决定） |
 
 ---
@@ -353,9 +335,6 @@ oha -z 30s -c 50 -m POST \
 | 清理过期明细 | `node dist/cli.js report` 之后按需调用 `Store.prune(retentionDays)`（建议配 cron） |
 | 轮换上游密钥 | 改环境变量 → 重启（配置在启动时装载） |
 | 紧急关闭降损层 | `RELAY_PRECHECK_ENABLED=0 RELAY_ATTRIBUTION_ENABLED=0` 重启；或把某层的 `precheck/attribution` 设为 `off` |
-| 查看业务数据 | `GET /biz`（需 `X-Admin-Token`）看营收/核销/在用码；`GET /biz/api/summary` 同口径 |
-| 撤销某个码 | `POST /biz/api/codes/<code>/revoke`（同时尽力吊销对应 relay key） |
-| 备份 | 停机或 `sqlite3 .backup` 同时备份 `relay.db` 与 `biz.db`；只备份前者会丢已售订单与核销进度 |
 
 ### 5.1 面板应急操作（不用登机器）
 
@@ -388,9 +367,6 @@ oha -z 30s -c 50 -m POST \
 | 面 | 措施 |
 |---|---|
 | 客户端 key | 只存 sha256；进程内明文 key 只短暂存在于请求头 |
-| 业务码 / 顾客会话 | 码是 Crockford Base32 随机串；会话是 HMAC 签名 Cookie（HttpOnly/SameSite=Lax），服务端不落会话表；relay key 由服务端确定性派生，不入库也不出页面 |
-| 支付回调 | `provider=alipay` 时校验 `app_id / out_trade_no / total_amount / sign`，重复通知幂等；mock 收银台的链接带一次性签名，无签名不能改单 |
-| 顾客侧越权 | `/biz/api/*` 顾客接口只返回本码数据；订单/码管理全部过 `adminToken`；顾客拿不到 relay key |
 | 上游 key | 仅存于配置/环境变量与内存；日志经 `redact()` 脱敏；管理接口返回时打码 |
 | 管理接口 | `adminToken` + 常数时间比较；未设置时仅本机。**看板外壳与 `/v1/panel` 免鉴权**（ADR-017），数据接口需令牌 |
 | 请求体 | 上限 `maxBodyBytes`；解析失败即 400，不做任何"尽力猜" |
@@ -413,8 +389,6 @@ oha -z 30s -c 50 -m POST \
 | `503 no_route` | 所有上游都被禁用/熔断/未声明该模型 | `GET /admin/api/providers` 看 `reachability` 与 `disabled` |
 | 用户说"模型不存在"但上游明明有 | 上游 `models` 列表没加该模型 → 预检拦了 | `relay catalog`；把模型加进 `providers[].models` |
 | 大量 `401` 归因 | 上游密钥失效 | 看板 `byFailureReason` 里 `auth_invalid` 的 provider |
-| `/biz`、`/s/:code` 返回 404 | 业务层未启用 | `business.enabled: true`；`relay check` 的「扫码次数包」段 |
-| 扫码后手机打不开 | 二维码里是 `127.0.0.1` | 配 `business.publicBaseUrl` 为手机可达地址（或隧道域名）再重新出码 |
 | 大量 `quota_exhausted` | 上游余额不足或触发 402 | 上游后台充值；或把该上游 `disabled` |
 | 流式响应"卡住不吐字" | 上游 TTFB 超时（引擎会按 `upstream_timeout` 归因） | 调大 `upstreamTtfbTimeoutMs`；或换上游 |
 | 看板数据为 0 但请求在跑 | 存储降级为内存 / flush 失败 | `GET /healthz` 看 `store.ok` 与 `degradedEvents`；查日志 `store.sqlite.flush_failed` |

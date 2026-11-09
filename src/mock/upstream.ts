@@ -223,21 +223,6 @@ export class MockUpstream {
       return;
     }
 
-    if (req.url?.includes('/images/generations')) {
-      const n = typeof body['n'] === 'number' && body['n'] > 0 ? Math.min(10, Math.floor(body['n'])) : 1;
-      res.writeHead(200, { 'content-type': 'application/json', ...(scenario.headers ?? {}) });
-      res.end(
-        JSON.stringify({
-          created: Math.floor(Date.now() / 1000),
-          data: Array.from({ length: n }, (_, i) => ({
-            url: `https://mock.local/${encodeURIComponent(model)}-${i + 1}.png`,
-            revised_prompt: `mock image ${i + 1}`,
-          })),
-        }),
-      );
-      return;
-    }
-
     if (stream) {
       await this.writeStream(res, model, body, scenario);
       return;

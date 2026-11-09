@@ -605,6 +605,7 @@ POST /agent/v1/chat/completions
 | [`docs/DESIGN.md`](docs/DESIGN.md) | 设计契约与红线：零改写、fail-open、纯函数审查、归因通道、合规 |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | 部署、配置项全表、运维手册、容量与安全、故障排查 |
 | [`docs/payathon/`](docs/payathon/01-需求分析说明书.md) | PAYATHON 2026 交付文档 8 篇：需求/概要/详细/数据库/接口/原型/测试/部署 |
+| [路演 PPT](docs/payathon/PAYATHON-2026-外卖AI.pptx) | PAYATHON 2026 路演稿（15 页）：问题、产品、外卖经济学、支付宝 AI 付、路线图 |
 | [`DECISIONS.md`](DECISIONS.md) | 决策记录（含 ADR-011 分两个系统的边界、ADR-012 起步只做单厂商） |
 | [`docs/research/01-竞品与生态矩阵.md`](docs/research/01-竞品与生态矩阵.md) | OneAPI / NewAPI / LiteLLM / Portkey / Helicone / OpenRouter 逐项对比（含源码行号证据） |
 | [`docs/research/02-上游协议与错误契约.md`](docs/research/02-上游协议与错误契约.md) | 实现者速用区：字段表、错误码映射、归因规则素材（21 个 URL 实证） |
